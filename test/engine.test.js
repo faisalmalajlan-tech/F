@@ -57,6 +57,37 @@ ok(r2.coverage && r2.coverage.requirements.length===2, 'استخرج متطلب�
 ok(r2.coverage.score>=0 && r2.coverage.score<=100, 'نسبة التغطية: '+r2.coverage.score+'%');
 r2.coverage.requirements.forEach(q=>console.log('    '+(q.met?'✓':'✗')+' ('+q.score+'%) '+q.requirement.slice(0,60)));
 
+console.log('\n— الأكواد والإعدادات —');
+ok(r.gaps.every(g=>/^G-[A-Z0-9]{3}-[A-Z0-9]{4}$/.test(g.code)), 'كل فجوة تحمل كودًا بالصيغة G-XXX-XXXX');
+ok(r.obligations.every(o=>/^OB-/.test(o.code)), 'كل التزام يحمل كود OB-');
+ok(r.preds.every(p=>/^DL-/.test(p.code)), 'كل موعد يحمل كود DL-');
+const again = E.analyze({docText: sample, todayISO:'2026-08-20'});
+ok(again.gaps.map(g=>g.code).join()===r.gaps.map(g=>g.code).join(), 'الأكواد ثابتة عبر التحاليل المتكررة');
+ok(new Set(r.gaps.map(g=>g.code)).size===r.gaps.length, 'لا تكرار في الأكواد');
+
+const NC = require('../src/config.js');
+// حذف بند معياري من الإعدادات يجب أن يزيل فجوته
+const noForce = NC.clone(NC.DEFAULTS);
+noForce.clauses = noForce.clauses.filter(c=>c.id!=='force');
+const rc = E.analyze({docText: sample, todayISO:'2026-08-20', config: noForce});
+ok(!rc.gaps.some(g=>g.title.indexOf('القوة القاهرة')>-1), 'حذف بند من الإعدادات يزيل فجوته');
+ok(rc.clauseReport.length===r.clauseReport.length-1, 'قائمة البنود تتبع الإعدادات');
+
+// رفع حد التصنيف الحرج يجب أن يقلّل الفجوات الحرجة
+const strict = NC.clone(NC.DEFAULTS); strict.scoring.thresholds.critical = 30;
+const rs = E.analyze({docText: sample, todayISO:'2026-08-20', config: strict});
+ok(rs.stats.critical > r.stats.critical, 'خفض حد «حرجة» يزيدها: '+r.stats.critical+' → '+rs.stats.critical);
+
+// إضافة صيغة إلزام جديدة ترصد التزامات أكثر
+const more = NC.clone(NC.DEFAULTS); more.deontic.push('تختص');
+const rm = E.analyze({docText: sample, todayISO:'2026-08-20', config: more});
+ok(rm.obligations.length > r.obligations.length, 'إضافة صيغة إلزام ترصد المزيد: '+r.obligations.length+' → '+rm.obligations.length);
+
+// تعديل وزن التجميع يغيّر الدرجة
+const w = NC.clone(NC.DEFAULTS); w.scoring.aggregate = {maxWeight:1, rmsWeight:0};
+ok(E.analyze({docText: sample, todayISO:'2026-08-20', config: w}).riskScore === Math.max(...r.gaps.map(g=>g.risk), ...r.preds.map(p=>p.risk)),
+   'وزن 1/0 يجعل الدرجة = أعلى بند');
+
 console.log('\n— الثبات —');
 ok(E.analyze({docText:sample,todayISO:'2026-08-20'}).riskScore===r.riskScore, 'نفس المدخل ⇒ نفس الدرجة (حتمي)');
 ok(r.fingerprint===r2.fingerprint, 'بصمة المستند ثابتة');

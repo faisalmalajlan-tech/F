@@ -2,15 +2,14 @@
    كل مخرجة هنا مشتقة من نص المستند: إما اقتباس حرفي، أو غياب موثّق.
    لا يوجد أي استدعاء شبكة في هذا الملف. */
 (function (root, factory) {
-  var api = factory();
+  var cfg = (typeof module === 'object' && module.exports) ? require('./config.js') : root.NadheerConfig;
+  var api = factory(cfg);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.NadheerEngine = api;
-})(typeof self !== 'undefined' ? self : this, function () {
+})(typeof self !== 'undefined' ? self : this, function (NC) {
   'use strict';
 
   var DAY = 86400000;
-  /* عتبة التغطية اللفظية: نسبة الكلمات الموضوعية للمتطلب الموجودة في أقرب بند مقابل. */
-  var COVER_THRESHOLD = 0.45;
 
   /* ═══════════ ١. التطبيع ═══════════ */
 
@@ -230,88 +229,78 @@
 
   /* ═══════════ ٦. الالتزامات والجزاءات ═══════════ */
 
-  var DEONTIC = normList([
-    'يجب','يتعين','يتوجب','يلتزم','تلتزم','ملزم','ملزمة','على الطرف','على المورد','على المقاول',
-    'يتعهد','تتعهد','يقر','لا يجوز','يحظر','يُحظر','يمتنع','يشترط','بشرط','شريطة','مطالب بـ',
-    'يقوم بـ','عليه أن','عليها أن','مسؤول عن','مسؤولة عن','يتحمل','تتحمل','وجب','ينبغي']);
-
-  var PENALTY_TIERS = [
-    { impact: 1.00, label: 'إنهاء أو سحب', terms: normList(['فسخ','إلغاء العقد','الغاء العقد','إنهاء العقد','سحب الترخيص','إلغاء الترخيص','شطب','إيقاف النشاط','ايقاف النشاط','الحرمان من']) },
-    { impact: 0.85, label: 'غرامة محددة',  terms: normList(['غرامة قدرها','غرامة مقدارها','شرط جزائي','غرامة تأخير','غرامة يومية']) },
-    { impact: 0.70, label: 'غرامة أو تعويض', terms: normList(['غرامة','جزاء','جزائية','تعويض','مخالفة','عقوبة','مساءلة','خصم']) },
-    { impact: 0.40, label: 'إنذار',        terms: normList(['إنذار','انذار','لفت نظر','تنبيه','ملاحظة كتابية']) }
-  ];
-
   var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
 
-  function classifyPenalty(normSentence) {
-    for (var i = 0; i < PENALTY_TIERS.length; i++) {
-      var hit = hasAny(normSentence, PENALTY_TIERS[i].terms);
-      if (hit) {
-        var t = PENALTY_TIERS[i];
-        var money = normSentence.match(MONEY);
-        return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
-                 label: money ? t.label + ' (' + money[0].trim() + ')' : t.label, term: hit };
-      }
-    }
-    return { impact: 0.35, label: 'لا جزاء منصوص عليه', term: null };
+  /* يترجم إعدادات المستخدم (نص عربي خام) إلى صيغ مطبَّعة، مرة واحدة لكل إعداد.
+     الذاكرة المؤقتة مفتاحها بصمة الإعداد، فتعديل الإدارة يُعاد ترجمته فورًا. */
+  var _cc = { key: null, val: null };
+  function compile(cfg) {
+    var key = JSON.stringify(cfg);
+    if (_cc.key === key) return _cc.val;
+    var c = {
+      raw: cfg,
+      deontic: normList(cfg.deontic || []),
+      parties: normList(cfg.parties || []),
+      penaltyTiers: (cfg.penaltyTiers || []).map(function (t) {
+        return { label: t.label, impact: +t.impact, terms: normList(t.terms || []) };
+      }),
+      noPenaltyImpact: +cfg.noPenaltyImpact,
+      noPenaltyLabel: cfg.noPenaltyLabel,
+      clauses: (cfg.clauses || []).map(function (c2) {
+        return { id: c2.id, title: c2.title, impact: +c2.impact, terms: normList(c2.terms || []) };
+      }),
+      vague: (cfg.vague || []).map(function (v) { return { term: normStr(v.term), raw: v.term, why: v.why }; }),
+      sc: cfg.scoring
+    };
+    _cc = { key: key, val: c };
+    return c;
   }
 
-  var PARTIES = normList(['الطرف الأول','الطرف الثاني','المورد','المقاول','المستفيد','العميل',
-    'الجهة الحكومية','صاحب الترخيص','المرخص له','المستأجر','المؤجر','الشركة','الموظف','البائع','المشتري']);
+  function classifyPenalty(normSentence, C) {
+    for (var i = 0; i < C.penaltyTiers.length; i++) {
+      var hit = hasAny(normSentence, C.penaltyTiers[i].terms);
+      if (hit) {
+        var t = C.penaltyTiers[i], money = normSentence.match(MONEY);
+        return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
+                 label: money ? t.label + ' (' + money[0].trim() + ')' : t.label };
+      }
+    }
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel };
+  }
 
-  /* ═══════════ ٧. قائمة البنود المعيارية ═══════════ */
-
-  var CLAUSES = [
-    { id:'conf',    title:'السرية وحماية المعلومات', impact:0.80, terms:normList(['سرية','السرية','معلومات سرية','عدم الإفصاح','عدم إفشاء','كتمان']) },
-    { id:'pdpl',    title:'حماية البيانات الشخصية',  impact:0.90, terms:normList(['البيانات الشخصية','بيانات شخصية','الخصوصية','حماية البيانات']) },
-    { id:'term',    title:'إنهاء العقد وفسخه',       impact:0.85, terms:normList(['إنهاء العقد','فسخ العقد','إنهاء الاتفاقية','الفسخ']) },
-    { id:'dispute', title:'تسوية المنازعات',          impact:0.75, terms:normList(['المنازعات','النزاع','التحكيم','المحكمة','الاختصاص القضائي','لجنة الفصل']) },
-    { id:'force',   title:'القوة القاهرة',            impact:0.55, terms:normList(['القوة القاهرة','قوة قاهرة','الظروف القاهرة']) },
-    { id:'ip',      title:'الملكية الفكرية',          impact:0.70, terms:normList(['الملكية الفكرية','حقوق الملكية','براءة اختراع','العلامة التجارية','حقوق النشر']) },
-    { id:'penalty', title:'الجزاءات والغرامات',       impact:0.80, terms:normList(['غرامة','الشرط الجزائي','جزاء','عقوبة']) },
-    { id:'warranty',title:'الضمان والكفالة',          impact:0.65, terms:normList(['ضمان','الكفالة','ضمان بنكي','خطاب ضمان']) },
-    { id:'ins',     title:'التأمين',                  impact:0.60, terms:normList(['التأمين','بوليصة','وثيقة تأمين']) },
-    { id:'amend',   title:'تعديل العقد وملاحقه',      impact:0.50, terms:normList(['تعديل العقد','ملحق','الملاحق','تعديل الاتفاقية']) },
-    { id:'notice',  title:'الإشعارات والمراسلات',     impact:0.45, terms:normList(['إشعار','إخطار','المراسلات','العنوان الوطني']) },
-    { id:'regs',    title:'الالتزام بالأنظمة السارية',impact:0.75, terms:normList(['الأنظمة','اللوائح','النظام السعودي','الجهات المختصة','الأنظمة النافذة']) },
-    { id:'liab',    title:'حدود المسؤولية',           impact:0.70, terms:normList(['حدود المسؤولية','حد المسؤولية','المسؤولية عن الأضرار','إعفاء من المسؤولية']) },
-    { id:'assign',  title:'التنازل عن العقد',         impact:0.50, terms:normList(['التنازل','تنازل الطرف','حوالة الحق','التعاقد من الباطن']) },
-    { id:'pay',     title:'الدفع والمستحقات',         impact:0.70, terms:normList(['الدفع','السداد','الفاتورة','المستحقات','الدفعة']) }
-  ];
-
-  var VAGUE = [
-    { term:'في وقت مناسب',       why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
-    { term:'في أقرب وقت',        why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
-    { term:'بالسرعة الممكنة',    why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
-    { term:'بشكل دوري',          why:'لا يحدد دورية محددة (شهري؟ سنوي؟)' },
-    { term:'بصورة منتظمة',       why:'لا يحدد دورية محددة' },
-    { term:'من وقت لآخر',        why:'يترك التوقيت مفتوحًا بلا سقف' },
-    { term:'حسب الحاجة',         why:'يترك التقدير لطرف واحد بلا معيار' },
-    { term:'عند الاقتضاء',       why:'يترك التقدير لطرف واحد بلا معيار' },
-    { term:'حسب ما يراه مناسباً',why:'سلطة تقديرية مطلقة بلا ضابط' },
-    { term:'ما يلزم',            why:'نطاق الالتزام غير محدد' },
-    { term:'الجهة المختصة',      why:'لم تُسمَّ الجهة صراحة' }
-  ].map(function (v) { return { term: normStr(v.term), why: v.why, raw: v.term }; });
+  /* ═══════════ أكواد التتبّع ═══════════ */
+  /* كود ثابت مشتق من بصمة المستند ومفتاح البند — البند نفسه يحمل
+     نفس الكود في كل تحليل لاحق، فيمكن تتبّعه عبر الزمن. */
+  function shortHash(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+    return h.toString(36).toUpperCase();
+  }
+  function makeCode(prefix, fp, key) {
+    return prefix + '-' + (shortHash(fp) + 'XXX').slice(0, 3) + '-' + (shortHash(key) + 'XXXX').slice(0, 4);
+  }
 
   /* ═══════════ ٨. حساب الخطر ═══════════ */
 
-  function timeDecay(d) {
+  function SC(sc) { return sc || NC.DEFAULTS.scoring; }
+  function timeDecay(d, sc) {
+    var k = SC(sc).decay;
     if (d === null || d === undefined) return 1.0;
-    if (d < 0)  return 1.60;
-    if (d < 7)  return 1.45;
-    if (d < 14) return 1.30;
-    if (d < 30) return 1.15;
-    if (d < 90) return 1.00;
-    return 0.85;
+    if (d < 0)  return k.overdue;
+    if (d < 7)  return k.d7;
+    if (d < 14) return k.d14;
+    if (d < 30) return k.d30;
+    if (d < 90) return k.d90;
+    return k.far;
   }
-  function probFromDays(d) {
-    if (d === null || d === undefined) return 0.50;   // غياب الموعد نفسه سببٌ للتأخر
-    if (d < 0)  return 0.95;
-    if (d < 7)  return 0.75;
-    if (d < 30) return 0.55;
-    if (d < 90) return 0.35;
-    return 0.20;
+  function probFromDays(d, sc) {
+    var k = SC(sc).probability;
+    if (d === null || d === undefined) return k.none;   // غياب الموعد نفسه سببٌ للتأخر
+    if (d < 0)  return k.overdue;
+    if (d < 7)  return k.d7;
+    if (d < 30) return k.d30;
+    if (d < 90) return k.d90;
+    return k.far;
   }
   function urgencyLabel(d) {
     if (d === null || d === undefined) return 'غير مؤرّخ';
@@ -321,19 +310,23 @@
     return 'مراقبة';
   }
   var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
-  function itemRisk(p, i, d) {
-    return Math.round(clamp(clamp(p, 0, 1) * clamp(i, 0, 1) * timeDecay(d) * 100, 0, 100));
+  function itemRisk(p, i, d, sc) {
+    return Math.round(clamp(clamp(p, 0, 1) * clamp(i, 0, 1) * timeDecay(d, sc) * 100, 0, 100));
   }
   /* الدرجة الكلية: ٦٠٪ من أعلى بند + ٤٠٪ من الجذر التربيعي للمتوسط.
      الحد الأعلى يمنع بندًا حرجًا واحدًا من أن تبتلعه بنود هادئة —
      وهو ما لا يفعله الجذر التربيعي وحده. */
-  function aggregateRisk(items) {
+  function aggregateRisk(items, sc) {
     if (!items.length) return 0;
+    var w = SC(sc).aggregate;
     var max = Math.max.apply(null, items);
     var rms = Math.sqrt(items.reduce(function (a, x) { return a + x * x; }, 0) / items.length);
-    return Math.round(max * 0.6 + rms * 0.4);
+    return Math.round(max * w.maxWeight + rms * w.rmsWeight);
   }
-  function sevFromRisk(r) { return r >= 66 ? 'critical' : r >= 33 ? 'medium' : 'low'; }
+  function sevFromRisk(r, sc) {
+    var t = SC(sc).thresholds;
+    return r >= t.critical ? 'critical' : r >= t.medium ? 'medium' : 'low';
+  }
 
   /* ═══════════ ٩. التحليل ═══════════ */
 
@@ -342,11 +335,11 @@
 
   /* ألفاظ الإلزام وأسماء الأطراف تتكرر في كل بند، فوجودها لا يدل على تغطية
      الموضوع. نستبعدها حتى تُقارَن الكلمات الموضوعية وحدها. */
-  var STRUCTURAL = null;
+  var STRUCTURAL = null, CC = null;
   function structuralWords() {
     if (STRUCTURAL) return STRUCTURAL;
     STRUCTURAL = {};
-    STOP.concat(DEONTIC, PARTIES).forEach(function (t) {
+    STOP.concat(CC.deontic, CC.parties).forEach(function (t) {
       t.split(' ').forEach(function (w) { if (w.length > 1) STRUCTURAL[w] = 1; });
     });
     return STRUCTURAL;
@@ -359,6 +352,9 @@
   }
 
   function analyze(opts) {
+    var C = compile(NC.merge(NC.DEFAULTS, opts.config || null));
+    var sc = C.sc, COVER_THRESHOLD = sc.coverageThreshold;
+    CC = C; STRUCTURAL = null;               // إعادة بناء قائمة الكلمات الهيكلية لهذا الإعداد
     var text = opts.docText || '';
     var refText = opts.refText || '';
     var today = todayUTC(opts.todayISO);
@@ -387,7 +383,7 @@
     /* ── الالتزامات ── */
     var obligations = [];
     sentences.forEach(function (s) {
-      var marker = hasAny(s.text, DEONTIC);
+      var marker = hasAny(s.text, C.deontic);
       if (!marker) return;
 
       // أقرب تاريخ أو مدة داخل الجملة نفسها
@@ -408,29 +404,36 @@
       }
 
       var days = d === null ? null : Math.round((d - today) / DAY);
-      var pen = classifyPenalty(s.text);
-      var party = hasAny(s.text, PARTIES);
+      var pen = classifyPenalty(s.text, C);
+      var party = hasAny(s.text, C.parties);
       var q = quoteAt(s.start, s.end);
       obligations.push({
         quote: q, marker: marker, party: party,
         rawDeadline: source, deadlineTS: d, approxDate: approx,
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
-        probability: probFromDays(days),
-        risk: itemRisk(probFromDays(days), pen.impact, days),
+        probability: probFromDays(days, sc),
+        risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
         _s: s.start, _e: s.end
       });
     });
-    obligations.forEach(function (o) { o.severity = sevFromRisk(o.risk); });
+    obligations.forEach(function (o, i) {
+      o.severity = sevFromRisk(o.risk, sc);
+      o.key = normStr(o.quote).slice(0, 70);
+      o.index = i;
+    });
 
     /* ── الفجوات ── */
     var gaps = [];
     function pushGap(g) {
-      g.risk = itemRisk(g.probability, g.impact, g.daysRemaining === undefined ? null : g.daysRemaining);
-      g.severity = sevFromRisk(g.risk);
-      g.decay = timeDecay(g.daysRemaining === undefined ? null : g.daysRemaining);
-      g.key = g.type + '|' + normStr(g.title).slice(0, 60);
+      var d = g.daysRemaining === undefined ? null : g.daysRemaining;
+      g.risk = itemRisk(g.probability, g.impact, d, sc);
+      g.severity = sevFromRisk(g.risk, sc);
+      g.decay = timeDecay(d, sc);
+      // الاقتباس جزء من المفتاح: فجوتان بنفس العنوان (كـ«التزام غير محدد المدة»)
+      // تنتميان لبندين مختلفين ويجب أن تحملا كودين مختلفين.
+      g.key = g.type + '|' + normStr(g.title).slice(0, 50) + '|' + normStr(g.evidence || '').slice(0, 60);
       gaps.push(g);
     }
 
@@ -452,22 +455,22 @@
           description: 'الجملة تحمل صيغة إلزام («' + o.marker + '») دون تاريخ أو مدة يمكن قياس التأخر عنها.',
           recommendation: 'أضف موعدًا صريحًا أو مدة محسوبة من تاريخ محدد.',
           evidence: o.quote, evidenceType: 'quote',
-          probability: 0.50, impact: o.impact, daysRemaining: null });
+          probability: sc.gapProbability.noDeadline, impact: o.impact, daysRemaining: null });
       });
 
     // (ج) صياغة فضفاضة
-    VAGUE.forEach(function (v) {
+    C.vague.forEach(function (v) {
       var idx = norm.indexOf(v.term);
       if (idx === -1) return;
       var host = sentences.filter(function (s) { return idx >= s.start && idx < s.end; })[0];
       pushGap({ type: 'صياغة فضفاضة', title: 'عبارة غير قابلة للقياس: «' + v.raw + '»',
         description: v.why + '.', recommendation: 'استبدلها بمدة أو تاريخ أو معيار قابل للتحقق.',
         evidence: host ? quoteAt(host.start, host.end) : quoteAt(idx, idx + v.term.length + 60),
-        evidenceType: 'quote', probability: 0.55, impact: 0.55, daysRemaining: null });
+        evidenceType: 'quote', probability: sc.gapProbability.vague, impact: sc.gapImpact.vague, daysRemaining: null });
     });
 
     // (د) بنود معيارية غائبة
-    var clauseReport = CLAUSES.map(function (c) {
+    var clauseReport = C.clauses.map(function (c) {
       var hit = hasAny(norm, c.terms);
       return { id: c.id, title: c.title, present: !!hit, hit: hit, impact: c.impact };
     });
@@ -476,7 +479,7 @@
         description: 'بحثنا عن كل الصيغ الشائعة لهذا البند في المستند ولم نجد أيًّا منها.',
         recommendation: 'أضف بندًا يعالج «' + c.title + '» أو وثّق سبب استبعاده.',
         evidence: null, evidenceType: 'absence',
-        probability: 0.60, impact: c.impact, daysRemaining: null });
+        probability: sc.gapProbability.missingClause, impact: c.impact, daysRemaining: null });
     });
 
     gaps.sort(function (a, b) { return b.risk - a.risk; });
@@ -495,7 +498,7 @@
           recommendation: o.daysRemaining < 14
             ? 'ابدأ التنفيذ الآن — النافذة أقل من أسبوعين.'
             : 'أدرجه في خطة الربع وحدّد مسؤولًا.',
-          evidence: o.quote, daysRemaining: o.daysRemaining,
+          evidence: o.quote, daysRemaining: o.daysRemaining, obKey: o.key, obIndex: o.index,
           risk: o.risk, severity: o.severity };
       });
 
@@ -504,7 +507,7 @@
     if (refText && refText.trim()) {
       var rn = normMap(refText), rSent = splitSentences(rn.norm);
       var docWords = sentences.map(function (s) { return contentWords(s.text); });
-      var reqs = rSent.filter(function (s) { return hasAny(s.text, DEONTIC); }).map(function (s) {
+      var reqs = rSent.filter(function (s) { return hasAny(s.text, C.deontic); }).map(function (s) {
         var need = contentWords(s.text);
         var best = 0, bestIdx = -1;
         docWords.forEach(function (dw, i) {
@@ -524,7 +527,7 @@
             description: 'أقوى تطابق لفظي وجدناه في مستندك كان ' + r.score + '٪ فقط.',
             recommendation: 'أضف بندًا يقابل هذا المتطلب صراحةً.',
             evidence: r.requirement, evidenceType: 'reference',
-            probability: 0.60, impact: 0.75, daysRemaining: null });
+            probability: sc.gapProbability.uncovered, impact: sc.gapImpact.uncovered, daysRemaining: null });
         });
         gaps.sort(function (a, b) { return b.risk - a.risk; });
       }
@@ -534,7 +537,28 @@
     gaps.forEach(function (g) { stats[g.severity]++; });
 
     var riskScore = aggregateRisk(gaps.map(function (g) { return g.risk; })
-                      .concat(preds.map(function (p) { return p.risk; })));
+                      .concat(preds.map(function (p) { return p.risk; })), sc);
+
+    /* أكواد تتبّع ثابتة — نفس البند يحمل نفس الكود في كل تحليل لاحق.
+       أي تصادم متبقٍ يُفَك بلاحقة ترتيبية، وهي ثابتة ما دام النص ثابتًا. */
+    function uniqueKeys(items) {
+      var seen = {};
+      items.forEach(function (it) {
+        var k = it.key;
+        if (seen[k] === undefined) { seen[k] = 0; return; }
+        seen[k]++; it.key = k + '#' + seen[k];
+      });
+    }
+    var fp = fingerprint(norm);
+    uniqueKeys(gaps);
+    uniqueKeys(obligations);
+    preds.forEach(function (p) {
+      var ob = obligations.filter(function (o) { return o.index === p.obIndex; })[0];
+      if (ob) p.obKey = ob.key;
+    });
+    gaps.forEach(function (g) { g.code = makeCode('G', fp, g.key); });
+    obligations.forEach(function (o) { o.code = makeCode('OB', fp, o.key); });
+    preds.forEach(function (p) { p.code = makeCode('DL', fp, p.obKey); });
 
     return {
       riskScore: riskScore, stats: stats, gaps: gaps, preds: preds,
@@ -546,7 +570,7 @@
       clauseReport: clauseReport, coverage: coverage,
       anchorDate: anchor ? { raw: anchor.raw, iso: new Date(anchor.ts).toISOString().slice(0, 10), approx: anchor.approx } : null,
       counts: { sentences: sentences.length, dates: dates.length, durations: durations.length, chars: text.length },
-      fingerprint: fingerprint(norm),
+      fingerprint: fp,
       generatedAt: Date.now()
     };
   }
@@ -579,6 +603,6 @@
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
-    CLAUSES: CLAUSES, VAGUE: VAGUE, DEONTIC: DEONTIC
+    makeCode: makeCode, shortHash: shortHash, compile: compile
   };
 });

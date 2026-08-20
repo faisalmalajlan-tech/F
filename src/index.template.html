@@ -11,12 +11,12 @@
 
 <nav class="topnav">
   <div class="nav-left">
-    <button class="burger" id="burgerBtn" type="button" aria-label="فتح التنقل">&#9776;</button>
-    <div class="avatar">ن</div>
-    <div class="userinfo"><span class="un">المستخدم</span><span class="ur">مدير الامتثال</span></div>
+    <button class="burger" id="burgerBtn" type="button" aria-label="فتح التنقل"></button>
+    <div class="avatar" id="avatarLetter">ن</div>
+    <div class="userinfo"><span class="un" id="userName">—</span><span class="ur" id="userRole">—</span></div>
   </div>
   <div style="display:flex;align-items:center">
-    <span class="offline" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق">● يعمل بلا إنترنت</span>
+    <span class="offline" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق"><i></i>يعمل بلا إنترنت</span>
     <button class="nav-brand" id="brandHome" type="button">
       <div><div class="nm">نذير</div><div class="sub">ذكاء الامتثال الاستباقي</div></div>
       <div class="brandmark">ن</div>
@@ -28,23 +28,14 @@
 
 <div class="navoverlay" id="navOverlay">
   <div class="scrim" id="navScrim"></div>
-  <nav class="navpanel" aria-label="التنقّل">
-    <div class="hdr">التنقّل</div>
-    <button class="navlink" type="button" data-r="dash">الرئيسية</button>
-    <button class="navlink" type="button" data-r="upload">رفع المستندات</button>
-    <button class="navlink" type="button" data-r="gaps">الفجوات</button>
-    <button class="navlink" type="button" data-r="risk">المخاطر والبنود</button>
-    <button class="navlink" type="button" data-r="remed">المعالجة</button>
-    <button class="navlink" type="button" data-r="predict">المواعيد القادمة</button>
-    <button class="navlink" type="button" data-r="report">التقرير</button>
-  </nav>
+  <nav class="navpanel" id="navPanel" aria-label="التنقّل"></nav>
 </div>
 
 <div id="proc">
   <div class="proc-wrap">
     <div class="proc-orb">ن</div>
-    <h2 style="font-size:18px;font-weight:800;margin-bottom:7px">نذير يقرأ مستندك</h2>
-    <p style="color:var(--text2);font-size:12px;margin-bottom:20px;line-height:1.7">
+    <h2 style="font-size:20px;font-weight:200;margin-bottom:8px">نذير يقرأ مستندك</h2>
+    <p style="color:var(--text3);font-size:11.5px;margin-bottom:8px;line-height:1.9;font-weight:300">
       التحليل يجري داخل جهازك. كل رقم تراه محسوب من نصّك، لا مقدَّر.</p>
     <div class="proc-steps" id="procSteps"></div>
   </div>
@@ -59,6 +50,8 @@
   </div>
 </div>
 
+<div id="gate"></div>
+
 <script>/*__PDFJS__*/</script>
 <script>
 /* عامل pdf.js مضمَّن كـ Blob — لا يوجد أي طلب شبكة */
@@ -72,7 +65,9 @@
   } catch (e) { /* قراءة PDF ستتعطل، وبقية التطبيق يعمل */ }
 })();
 </script>
+<script>/*__CONFIG__*/</script>
 <script>/*__ENGINE__*/</script>
+<script>/*__AUDIT__*/</script>
 <script>/*__APP__*/</script>
 </body>
 </html>

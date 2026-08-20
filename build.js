@@ -3,10 +3,14 @@ const fs = require('fs'), path = require('path');
 const rd = p => fs.readFileSync(path.join(__dirname, p), 'utf8');
 
 const out = rd('src/index.template.html')
-  .replace('/*__CSS__*/',        () => rd('src/styles.css'))
+  .replace('/*__CSS__*/', () => rd('src/styles.css')
+      .replace('/*__MESH__*/', 'url("data:image/svg+xml;base64,' +
+        fs.readFileSync(path.join(__dirname, 'src/mesh.svg')).toString('base64') + '")'))
   .replace('/*__PDFJS__*/',      () => rd('vendor/pdf.min.js'))
   .replace('/*__WORKER_B64__*/', () => fs.readFileSync(path.join(__dirname, 'vendor/pdf.worker.min.js')).toString('base64'))
+  .replace('/*__CONFIG__*/',     () => rd('src/config.js'))
   .replace('/*__ENGINE__*/',     () => rd('src/engine.js'))
+  .replace('/*__AUDIT__*/',      () => rd('src/audit.js'))
   .replace('/*__APP__*/',        () => rd('src/app.js'));
 
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
@@ -14,7 +18,8 @@ fs.writeFileSync(path.join(__dirname, 'dist/nadheer.html'), out);
 
 // ── حارس الانعزال ──
 // كودنا نحن يجب أن يخلو تمامًا من أي مرجع شبكي.
-const ours = ['src/index.template.html', 'src/styles.css', 'src/engine.js', 'src/app.js']
+const ours = ['src/index.template.html', 'src/styles.css', 'src/config.js',
+              'src/engine.js', 'src/audit.js', 'src/app.js']
   .map(f => ({ f, src: rd(f) }));
 const NET = [/https?:\/\/(?!www\.w3\.org)[^\s"'`)]+/g, /\bfetch\s*\(/g, /XMLHttpRequest/g,
              /WebSocket/g, /navigator\.sendBeacon/g, /EventSource/g, /import\s*\(/g];
