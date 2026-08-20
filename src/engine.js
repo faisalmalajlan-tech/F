@@ -344,11 +344,23 @@
     });
     return STRUCTURAL;
   }
+  /* تجذير خفيف: العربية تصرّف الكلمة الواحدة بصيغ كثيرة («مستقل/مستقلة/المستقلة»)
+     فبدونه تُعدّ صيغتان لنفس الكلمة غير متطابقتين وتنهار المطابقة. */
+  function stem(w) {
+    w = w.replace(/^(وال|بال|كال|فال|ال|و|ب|ل|ف|ك)/, '');
+    w = w.replace(/(اتها|اتهم|يتها|ياتهم|هما|كما|هم|هن|نا|كم|ها|ه|ي)$/, '');
+    w = w.replace(/(اتين|ييه|يات|ات|ين|ون|يه|ية|ه|ا)$/, '');
+    return w.length >= 3 ? w : null;
+  }
   function contentWords(normText) {
-    var sw = structuralWords();
-    return normText.split(/[^ء-ي0-9a-z]+/).filter(function (w) {
-      return w.length > 2 && !sw[w];
+    var sw = structuralWords(), out = [], seen = {};
+    normText.split(/[^ء-ي0-9a-z]+/).forEach(function (w) {
+      if (w.length <= 2 || sw[w]) return;
+      var st = stem(w);
+      if (!st || sw[st] || seen[st]) return;
+      seen[st] = 1; out.push(st);
     });
+    return out;
   }
 
   function analyze(opts) {
@@ -507,18 +519,47 @@
     if (refText && refText.trim()) {
       var rn = normMap(refText), rSent = splitSentences(rn.norm);
       var docWords = sentences.map(function (s) { return contentWords(s.text); });
+
+      /* الندرة تُقاس على المرجع نفسه، لا على مستندك.
+         لو قِستها على مستندك لحصلت الكلمةُ الغائبة عنه تمامًا على أعلى ندرة،
+         فتُختار ضمن «الكلمات المميّزة» وهي مضمونة الغياب — عكس المقصود.
+         على المرجع: «المؤسسة» ترد في كل مادة فتضعف، و«الاختراق» ترد في مادة
+         واحدة فتقوى، وهي فعلًا الكلمة التي تحدد موضوع المتطلب. */
+      var refWordSets = rSent.map(function (s2) { return contentWords(s2.text); });
+      var df = {};
+      refWordSets.forEach(function (rw) {
+        var once = {};
+        rw.forEach(function (w) { if (!once[w]) { once[w] = 1; df[w] = (df[w] || 0) + 1; } });
+      });
+      var N = Math.max(1, refWordSets.length);
+      var idf = function (w) { return Math.log(1 + N / (1 + (df[w] || 0))); };
+
+      /* السؤال: هل تعالج الإجراءات موضوع هذا المتطلب؟
+         نقيسه على أميز ٦ كلمات في المتطلب (الأعلى ندرةً) لأن جملة المتطلب
+         أطول عادةً من البند المقابل، فقياس كل كلماتها يظلم التغطية الحقيقية.
+         الدليل المعروض يبقى البند الأقرب لفظًا. */
+      var TOPK = 6;
+      var docAll = {};
+      docWords.forEach(function (dw) { dw.forEach(function (w) { docAll[w] = 1; }); });
+
       var reqs = rSent.filter(function (s) { return hasAny(s.text, C.deontic); }).map(function (s) {
-        var need = contentWords(s.text);
+        var need = contentWords(s.text).sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+        var total = need.reduce(function (a, w) { return a + idf(w); }, 0);
+        var found = need.reduce(function (a, w) { return a + (docAll[w] ? idf(w) : 0); }, 0);
+        var score = total ? found / total : 0;
+
         var best = 0, bestIdx = -1;
         docWords.forEach(function (dw, i) {
-          if (!need.length) return;
-          var hit = need.filter(function (w) { return dw.indexOf(w) > -1; }).length / need.length;
+          if (!total) return;
+          var hit = need.reduce(function (a, w) { return a + (dw.indexOf(w) > -1 ? idf(w) : 0); }, 0) / total;
           if (hit > best) { best = hit; bestIdx = i; }
         });
+
         return { requirement: refText.slice(rn.map[s.start], rn.map[Math.min(s.end, rn.map.length) - 1] + 1).trim(),
-                 met: best >= COVER_THRESHOLD, score: Math.round(best * 100),
-                 matched: bestIdx > -1 && best >= COVER_THRESHOLD ? quoteAt(sentences[bestIdx].start, sentences[bestIdx].end) : null };
+                 met: score >= COVER_THRESHOLD, score: Math.round(score * 100), terms: need,
+                 matched: bestIdx > -1 ? quoteAt(sentences[bestIdx].start, sentences[bestIdx].end) : null };
       });
+
       if (reqs.length) {
         coverage = { requirements: reqs,
           score: Math.round(reqs.filter(function (r) { return r.met; }).length / reqs.length * 100) };

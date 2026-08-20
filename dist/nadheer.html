@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src blob: data:; worker-src blob:">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D8BE86' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 1.8 22.2 12 12 22.2 1.8 12Z' stroke-width='1.15' opacity='.55'/%3E%3Cpath d='M6.9 16.4a5.15 5.15 0 0 1 10.2 0' stroke-width='1.15' opacity='.45'/%3E%3Cpath d='M8.85 16.4a3.2 3.2 0 0 1 6.3 0' stroke-width='1.3' opacity='.8'/%3E%3Ccircle cx='12' cy='16.5' r='1.45' fill='%23D8BE86' stroke='none'/%3E%3C/svg%3E">
 <title>نذير — ذكاء الامتثال الاستباقي</title>
 <style>:root{
   /* منتصف الليل البنفسجي + ذهب شمبانيا — لا تدرّجات زرقاء/بنفسجية معتادة */
@@ -46,8 +47,8 @@ button{font-family:inherit;color:inherit}
   background:linear-gradient(90deg,transparent,rgba(216,190,134,.34),transparent)}
 .num{font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
 
-.brandmark{width:33px;height:33px;border-radius:2px;border:1px solid var(--line2);
-  display:flex;align-items:center;justify-content:center;font-weight:400;font-size:15px;flex-shrink:0;
+.brandmark{width:34px;height:34px;border-radius:2px;border:1px solid var(--line2);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
   color:var(--gold2);background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
 nav.topnav{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;
   background:rgba(7,9,21,.78);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50;backdrop-filter:blur(16px)}
@@ -138,9 +139,10 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
   background-repeat:no-repeat;background-position:center -60px,right top,center;background-size:1600px 1000px,auto,auto}
 #gate.open{display:flex}
 .gate-card{width:100%;max-width:372px;text-align:center}
-.gate-mark{width:56px;height:56px;border-radius:3px;border:1px solid var(--line2);margin:0 auto 22px;
-  display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--gold2);
-  background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
+.gate-mark{width:74px;height:74px;border-radius:3px;border:1px solid var(--line2);margin:0 auto 24px;
+  display:flex;align-items:center;justify-content:center;color:var(--gold2);
+  background:linear-gradient(150deg,rgba(216,190,134,.18),transparent 70%);
+  box-shadow:0 0 44px rgba(216,190,134,.10)}
 .gate-card h1{font-size:27px;font-weight:200;margin:0 0 6px;letter-spacing:.01em}
 .gate-card .tag{font-size:10px;color:var(--text3);letter-spacing:.18em;margin-bottom:26px}
 .roles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
@@ -306,8 +308,8 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
   background-repeat:no-repeat;background-position:center -60px,center;background-size:1600px 1000px,auto}
 #proc.active{display:flex}
 .proc-wrap{max-width:390px;width:100%;text-align:center}
-.proc-orb{width:66px;height:66px;border-radius:3px;border:1px solid var(--line2);
-  display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:26px;color:var(--gold2);
+.proc-orb{width:68px;height:68px;border-radius:3px;border:1px solid var(--line2);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 24px;color:var(--gold2);
   background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
 .proc-steps{text-align:right;margin-top:24px}
 .proc-step{display:flex;align-items:center;gap:12px;padding:9px 0;font-size:11.5px;color:var(--text3);
@@ -349,7 +351,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     <span class="offline" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق"><i></i>يعمل بلا إنترنت</span>
     <button class="nav-brand" id="brandHome" type="button">
       <div><div class="nm">نذير</div><div class="sub">ذكاء الامتثال الاستباقي</div></div>
-      <div class="brandmark">ن</div>
+      <div class="brandmark" id="brandLogo"></div>
     </button>
   </div>
 </nav>
@@ -363,7 +365,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
 
 <div id="proc">
   <div class="proc-wrap">
-    <div class="proc-orb">ن</div>
+    <div class="proc-orb" id="procLogo"></div>
     <h2 style="font-size:20px;font-weight:200;margin-bottom:8px">نذير يقرأ مستندك</h2>
     <p style="color:var(--text3);font-size:11.5px;margin-bottom:8px;line-height:1.9;font-weight:300">
       التحليل يجري داخل جهازك. كل رقم تراه محسوب من نصّك، لا مقدَّر.</p>
@@ -902,11 +904,23 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     });
     return STRUCTURAL;
   }
+  /* تجذير خفيف: العربية تصرّف الكلمة الواحدة بصيغ كثيرة («مستقل/مستقلة/المستقلة»)
+     فبدونه تُعدّ صيغتان لنفس الكلمة غير متطابقتين وتنهار المطابقة. */
+  function stem(w) {
+    w = w.replace(/^(وال|بال|كال|فال|ال|و|ب|ل|ف|ك)/, '');
+    w = w.replace(/(اتها|اتهم|يتها|ياتهم|هما|كما|هم|هن|نا|كم|ها|ه|ي)$/, '');
+    w = w.replace(/(اتين|ييه|يات|ات|ين|ون|يه|ية|ه|ا)$/, '');
+    return w.length >= 3 ? w : null;
+  }
   function contentWords(normText) {
-    var sw = structuralWords();
-    return normText.split(/[^ء-ي0-9a-z]+/).filter(function (w) {
-      return w.length > 2 && !sw[w];
+    var sw = structuralWords(), out = [], seen = {};
+    normText.split(/[^ء-ي0-9a-z]+/).forEach(function (w) {
+      if (w.length <= 2 || sw[w]) return;
+      var st = stem(w);
+      if (!st || sw[st] || seen[st]) return;
+      seen[st] = 1; out.push(st);
     });
+    return out;
   }
 
   function analyze(opts) {
@@ -1065,18 +1079,47 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     if (refText && refText.trim()) {
       var rn = normMap(refText), rSent = splitSentences(rn.norm);
       var docWords = sentences.map(function (s) { return contentWords(s.text); });
+
+      /* الندرة تُقاس على المرجع نفسه، لا على مستندك.
+         لو قِستها على مستندك لحصلت الكلمةُ الغائبة عنه تمامًا على أعلى ندرة،
+         فتُختار ضمن «الكلمات المميّزة» وهي مضمونة الغياب — عكس المقصود.
+         على المرجع: «المؤسسة» ترد في كل مادة فتضعف، و«الاختراق» ترد في مادة
+         واحدة فتقوى، وهي فعلًا الكلمة التي تحدد موضوع المتطلب. */
+      var refWordSets = rSent.map(function (s2) { return contentWords(s2.text); });
+      var df = {};
+      refWordSets.forEach(function (rw) {
+        var once = {};
+        rw.forEach(function (w) { if (!once[w]) { once[w] = 1; df[w] = (df[w] || 0) + 1; } });
+      });
+      var N = Math.max(1, refWordSets.length);
+      var idf = function (w) { return Math.log(1 + N / (1 + (df[w] || 0))); };
+
+      /* السؤال: هل تعالج الإجراءات موضوع هذا المتطلب؟
+         نقيسه على أميز ٦ كلمات في المتطلب (الأعلى ندرةً) لأن جملة المتطلب
+         أطول عادةً من البند المقابل، فقياس كل كلماتها يظلم التغطية الحقيقية.
+         الدليل المعروض يبقى البند الأقرب لفظًا. */
+      var TOPK = 6;
+      var docAll = {};
+      docWords.forEach(function (dw) { dw.forEach(function (w) { docAll[w] = 1; }); });
+
       var reqs = rSent.filter(function (s) { return hasAny(s.text, C.deontic); }).map(function (s) {
-        var need = contentWords(s.text);
+        var need = contentWords(s.text).sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+        var total = need.reduce(function (a, w) { return a + idf(w); }, 0);
+        var found = need.reduce(function (a, w) { return a + (docAll[w] ? idf(w) : 0); }, 0);
+        var score = total ? found / total : 0;
+
         var best = 0, bestIdx = -1;
         docWords.forEach(function (dw, i) {
-          if (!need.length) return;
-          var hit = need.filter(function (w) { return dw.indexOf(w) > -1; }).length / need.length;
+          if (!total) return;
+          var hit = need.reduce(function (a, w) { return a + (dw.indexOf(w) > -1 ? idf(w) : 0); }, 0) / total;
           if (hit > best) { best = hit; bestIdx = i; }
         });
+
         return { requirement: refText.slice(rn.map[s.start], rn.map[Math.min(s.end, rn.map.length) - 1] + 1).trim(),
-                 met: best >= COVER_THRESHOLD, score: Math.round(best * 100),
-                 matched: bestIdx > -1 && best >= COVER_THRESHOLD ? quoteAt(sentences[bestIdx].start, sentences[bestIdx].end) : null };
+                 met: score >= COVER_THRESHOLD, score: Math.round(score * 100), terms: need,
+                 matched: bestIdx > -1 ? quoteAt(sentences[bestIdx].start, sentences[bestIdx].end) : null };
       });
+
       if (reqs.length) {
         coverage = { requirements: reqs,
           score: Math.round(reqs.filter(function (r) { return r.met; }).length / reqs.length * 100) };
@@ -1302,6 +1345,18 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     out:'<path d="M14 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8"/><path d="M17 16l4-4-4-4M21 12H10"/>',
     burger:'<path d="M3 6h18M3 12h18M3 18h18"/>'
   };
+  /* شعار نذير: معيّن يحيط بنبضات صاعدة من نقطة — إشارة إنذار مبكر.
+     يُرسم بالذهب، ويعمل من 20px إلى 80px بنفس الوضوح. */
+  function logo(size, sw) {
+    var w = sw || 1.15;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 1.8 22.2 12 12 22.2 1.8 12Z" stroke-width="' + w + '" opacity=".55"/>' +
+      '<path d="M6.9 16.4a5.15 5.15 0 0 1 10.2 0" stroke-width="' + w + '" opacity=".45"/>' +
+      '<path d="M8.85 16.4a3.2 3.2 0 0 1 6.3 0" stroke-width="' + (w * 1.15) + '" opacity=".8"/>' +
+      '<circle cx="12" cy="16.5" r="1.45" fill="currentColor" stroke="none"/></svg>';
+  }
+
   function ico(name, size) {
     return '<svg width="' + (size || 17) + '" height="' + (size || 17) + '" viewBox="0 0 24 24" fill="none" ' +
       'stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + I[name] + '</svg>';
@@ -1334,7 +1389,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     $('gate').classList.add('open');
     $('gate').innerHTML =
       '<div class="gate-card">' +
-      '<div class="gate-mark">ن</div>' +
+      '<div class="gate-mark">' + logo(40, 1.05) + '</div>' +
       '<h1>نذير</h1><div class="tag">ذكاء الامتثال الاستباقي</div>' +
       '<div class="roles">' +
       '<button type="button" class="role' + (gateRole === 'user' ? ' sel' : '') + '" data-role="user">' +
@@ -1580,6 +1635,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     if (!t1) { showError('أضف المستند الأساسي أولًا — ارفع ملفًا أو الصق النص.'); return; }
 
     S.sourceText = t1;
+    $('procLogo').innerHTML = logo(34, 1.1);
     $('proc').classList.add('active');
     $('procSteps').innerHTML = STEPS.map(function (s, i) {
       return '<div class="proc-step" id="ps_' + i + '"><div class="dot">' + (i + 1) + '</div>' + s +
@@ -2306,6 +2362,7 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
     go('dash');
   }
 
+  $('brandLogo').innerHTML = logo(19);
   $('burgerBtn').innerHTML = ico('burger', 17);
   $('burgerBtn').addEventListener('click', function () { $('navOverlay').classList.add('open'); });
   $('navScrim').addEventListener('click', closeOverlays);

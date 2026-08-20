@@ -70,7 +70,7 @@ const sample = require('./sample.js');
     await nav(r);
     ok(await page.locator(sel).first().isVisible(), 'صفحة ' + label + ' تُعرض');
   }
-  await page.screenshot({ path: 'dist/shot-report.png' });
+  await page.screenshot({ path: 'dist/test-report.png' });
 
   console.log('\n— دخول المدير —');
   await page.click('#burgerBtn'); await page.waitForTimeout(150);
@@ -117,7 +117,7 @@ const sample = require('./sample.js');
   await page.fill('#auditQ', ''); await page.waitForTimeout(400);
   await page.click('[data-af="config"]'); await page.waitForTimeout(300);
   ok((await page.locator('.log').count()) >= 1, 'تصفية السجل بالنوع تعمل');
-  await page.screenshot({ path: 'dist/shot-audit.png' });
+  await page.screenshot({ path: 'dist/test-audit.png' });
 
   console.log('\n— الأمان —');
   await nav('security');
@@ -133,8 +133,8 @@ const sample = require('./sample.js');
   await page.fill('#gateCode', 'riyadh26'); await page.click('#gateGo'); await page.waitForTimeout(350);
   ok(!(await page.locator('#gate.open').isVisible()), 'الرمز الجديد يعمل');
 
-  await nav('dash'); await page.screenshot({ path: 'dist/shot-dash.png' });
-  await nav('admin'); await page.screenshot({ path: 'dist/shot-admin.png' });
+  await nav('dash'); await page.screenshot({ path: 'dist/test-dash.png' });
+  await nav('admin'); await page.screenshot({ path: 'dist/test-admin.png' });
 
   console.log('\n— الانعزال —');
   ok(netCalls.length === 0, 'صفر طلبات شبكة' + (netCalls.length ? ': ' + netCalls.join(', ') : ''));

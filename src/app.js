@@ -41,6 +41,18 @@
     out:'<path d="M14 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8"/><path d="M17 16l4-4-4-4M21 12H10"/>',
     burger:'<path d="M3 6h18M3 12h18M3 18h18"/>'
   };
+  /* شعار نذير: معيّن يحيط بنبضات صاعدة من نقطة — إشارة إنذار مبكر.
+     يُرسم بالذهب، ويعمل من 20px إلى 80px بنفس الوضوح. */
+  function logo(size, sw) {
+    var w = sw || 1.15;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 1.8 22.2 12 12 22.2 1.8 12Z" stroke-width="' + w + '" opacity=".55"/>' +
+      '<path d="M6.9 16.4a5.15 5.15 0 0 1 10.2 0" stroke-width="' + w + '" opacity=".45"/>' +
+      '<path d="M8.85 16.4a3.2 3.2 0 0 1 6.3 0" stroke-width="' + (w * 1.15) + '" opacity=".8"/>' +
+      '<circle cx="12" cy="16.5" r="1.45" fill="currentColor" stroke="none"/></svg>';
+  }
+
   function ico(name, size) {
     return '<svg width="' + (size || 17) + '" height="' + (size || 17) + '" viewBox="0 0 24 24" fill="none" ' +
       'stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + I[name] + '</svg>';
@@ -73,7 +85,7 @@
     $('gate').classList.add('open');
     $('gate').innerHTML =
       '<div class="gate-card">' +
-      '<div class="gate-mark">ن</div>' +
+      '<div class="gate-mark">' + logo(40, 1.05) + '</div>' +
       '<h1>نذير</h1><div class="tag">ذكاء الامتثال الاستباقي</div>' +
       '<div class="roles">' +
       '<button type="button" class="role' + (gateRole === 'user' ? ' sel' : '') + '" data-role="user">' +
@@ -319,6 +331,7 @@
     if (!t1) { showError('أضف المستند الأساسي أولًا — ارفع ملفًا أو الصق النص.'); return; }
 
     S.sourceText = t1;
+    $('procLogo').innerHTML = logo(34, 1.1);
     $('proc').classList.add('active');
     $('procSteps').innerHTML = STEPS.map(function (s, i) {
       return '<div class="proc-step" id="ps_' + i + '"><div class="dot">' + (i + 1) + '</div>' + s +
@@ -1045,6 +1058,7 @@
     go('dash');
   }
 
+  $('brandLogo').innerHTML = logo(19);
   $('burgerBtn').innerHTML = ico('burger', 17);
   $('burgerBtn').addEventListener('click', function () { $('navOverlay').classList.add('open'); });
   $('navScrim').addEventListener('click', closeOverlays);

@@ -39,8 +39,8 @@ button{font-family:inherit;color:inherit}
   background:linear-gradient(90deg,transparent,rgba(216,190,134,.34),transparent)}
 .num{font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
 
-.brandmark{width:33px;height:33px;border-radius:2px;border:1px solid var(--line2);
-  display:flex;align-items:center;justify-content:center;font-weight:400;font-size:15px;flex-shrink:0;
+.brandmark{width:34px;height:34px;border-radius:2px;border:1px solid var(--line2);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
   color:var(--gold2);background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
 nav.topnav{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;
   background:rgba(7,9,21,.78);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50;backdrop-filter:blur(16px)}
@@ -131,9 +131,10 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
   background-repeat:no-repeat;background-position:center -60px,right top,center;background-size:1600px 1000px,auto,auto}
 #gate.open{display:flex}
 .gate-card{width:100%;max-width:372px;text-align:center}
-.gate-mark{width:56px;height:56px;border-radius:3px;border:1px solid var(--line2);margin:0 auto 22px;
-  display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--gold2);
-  background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
+.gate-mark{width:74px;height:74px;border-radius:3px;border:1px solid var(--line2);margin:0 auto 24px;
+  display:flex;align-items:center;justify-content:center;color:var(--gold2);
+  background:linear-gradient(150deg,rgba(216,190,134,.18),transparent 70%);
+  box-shadow:0 0 44px rgba(216,190,134,.10)}
 .gate-card h1{font-size:27px;font-weight:200;margin:0 0 6px;letter-spacing:.01em}
 .gate-card .tag{font-size:10px;color:var(--text3);letter-spacing:.18em;margin-bottom:26px}
 .roles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
@@ -299,8 +300,8 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
   background-repeat:no-repeat;background-position:center -60px,center;background-size:1600px 1000px,auto}
 #proc.active{display:flex}
 .proc-wrap{max-width:390px;width:100%;text-align:center}
-.proc-orb{width:66px;height:66px;border-radius:3px;border:1px solid var(--line2);
-  display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:26px;color:var(--gold2);
+.proc-orb{width:68px;height:68px;border-radius:3px;border:1px solid var(--line2);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 24px;color:var(--gold2);
   background:linear-gradient(150deg,rgba(216,190,134,.16),transparent 70%)}
 .proc-steps{text-align:right;margin-top:24px}
 .proc-step{display:flex;align-items:center;gap:12px;padding:9px 0;font-size:11.5px;color:var(--text3);
