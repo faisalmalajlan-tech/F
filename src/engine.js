@@ -1,0 +1,584 @@
+/* نذير — محرك التحليل الحتمي (بلا إنترنت، بلا نموذج لغوي)
+   كل مخرجة هنا مشتقة من نص المستند: إما اقتباس حرفي، أو غياب موثّق.
+   لا يوجد أي استدعاء شبكة في هذا الملف. */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.NadheerEngine = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var DAY = 86400000;
+  /* عتبة التغطية اللفظية: نسبة الكلمات الموضوعية للمتطلب الموجودة في أقرب بند مقابل. */
+  var COVER_THRESHOLD = 0.45;
+
+  /* ═══════════ ١. التطبيع ═══════════ */
+
+  var AR_DIGITS = { '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+                    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9' };
+
+  /* يبني نصًّا مطبَّعًا مع خريطة تُعيد كل حرف إلى موضعه في النص الأصلي.
+     الخريطة هي ما يسمح لنا بإبراز الاقتباس في المستند الأصلي بدقة. */
+  function normMap(text) {
+    var norm = '', map = [], i, c;
+    for (i = 0; i < text.length; i++) {
+      c = text[i];
+      if (AR_DIGITS[c]) c = AR_DIGITS[c];
+      if (/[ً-ْٰـ]/.test(c)) continue;      // تشكيل وتطويل
+      if ('إأآٱا'.indexOf(c) > -1) c = 'ا';
+      else if ('ىي'.indexOf(c) > -1) c = 'ي';
+      else if (c === 'ة') c = 'ه';
+      else if (c === 'ؤ') c = 'و';
+      else if (c === 'ئ') c = 'ي';
+      else c = c.toLowerCase();
+      if (/[\s ]/.test(c)) {
+        if (norm === '' || norm.charAt(norm.length - 1) === ' ') continue;
+        c = ' ';
+      }
+      norm += c; map.push(i);
+    }
+    return { norm: norm, map: map };
+  }
+
+  function normStr(t) { return normMap(t || '').norm.trim(); }
+
+  /* يطبّع كل عناصر قائمة كلمات مرة واحدة عند التحميل، حتى لا يختلف
+     تطبيع القوائم عن تطبيع النص. */
+  function normList(arr) {
+    var out = [], i, v;
+    for (i = 0; i < arr.length; i++) { v = normStr(arr[i]); if (v) out.push(v); }
+    return out;
+  }
+
+  function hasAny(normText, terms) {
+    for (var i = 0; i < terms.length; i++) if (normText.indexOf(terms[i]) > -1) return terms[i];
+    return null;
+  }
+
+  /* ═══════════ ٢. التقويم ═══════════ */
+
+  /* التقويم الهجري المدني (الخوارزمية الجدولية). يفارق تقويم أم القرى
+     بيوم واحد أحيانًا — لذلك كل تاريخ هجري يُعلَّم approx = true. */
+  function hijriToJDN(y, m, d) {
+    return Math.floor((11 * y + 3) / 30) + 354 * y + 30 * m -
+           Math.floor((m - 1) / 2) + d + 1948440 - 386;
+  }
+  function jdnToUTC(jdn) {
+    var l = jdn + 68569;
+    var n = Math.floor(4 * l / 146097);
+    l = l - Math.floor((146097 * n + 3) / 4);
+    var i = Math.floor(4000 * (l + 1) / 1461001);
+    l = l - Math.floor(1461 * i / 4) + 31;
+    var j = Math.floor(80 * l / 2447);
+    var day = l - Math.floor(2447 * j / 80);
+    l = Math.floor(j / 11);
+    var month = j + 2 - 12 * l;
+    var year = 100 * (n - 49) + i + l;
+    return Date.UTC(year, month - 1, day);
+  }
+  function hijriToUTC(y, m, d) { return jdnToUTC(hijriToJDN(y, m, d)); }
+
+  /* كل التواريخ في المحرك تُبنى بـ UTC، و«اليوم» يُشتق من التاريخ المحلي
+     ثم يُثبَّت على UTC — حتى لا يختلف عدد الأيام باختلاف المنطقة الزمنية. */
+  function todayUTC(iso) {
+    if (iso) { var p = iso.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
+    var n = new Date();
+    return Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+  }
+
+  var GREG_MONTHS = normList([
+    'يناير','فبراير','مارس','أبريل','ابريل','مايو','يونيو','يوليو','أغسطس','اغسطس',
+    'سبتمبر','أكتوبر','اكتوبر','نوفمبر','ديسمبر']);
+  var GREG_MONTH_NO = { 'يناير':1,'فبراير':2,'مارس':3,'ابريل':4,'مايو':5,'يونيو':6,
+    'يوليو':7,'اغسطس':8,'سبتمبر':9,'اكتوبر':10,'نوفمبر':11,'ديسمبر':12,
+    'كانون الثاني':1,'شباط':2,'اذار':3,'نيسان':4,'ايار':5,'حزيران':6,
+    'تموز':7,'اب':8,'ايلول':9,'تشرين الاول':10,'تشرين الثاني':11,'كانون الاول':12 };
+  var HIJRI_MONTH_NO = { 'محرم':1,'صفر':2,'ربيع الاول':3,'ربيع الاخر':4,'ربيع الثاني':4,
+    'جمادي الاولي':5,'جمادي الاخره':6,'جمادي الثانيه':6,'رجب':7,'شعبان':8,
+    'رمضان':9,'شوال':10,'ذو القعده':11,'ذي القعده':11,'ذو الحجه':12,'ذي الحجه':12 };
+
+  /* ═══════════ ٣. استخراج التواريخ ═══════════ */
+
+  /* ملاحظة: لا تضع 'هـ' هنا — التطويل يُحذف في التطبيع فتصير 'ه' المجردة
+     وتطابق أي نص عربي تقريبًا. لاحقة الهجري تُفحص بعد نهاية التاريخ مباشرة. */
+  var HIJRI_HINT = normList(['هجري','هجرية','للهجرة','أم القرى','تقويم أم القرى']);
+
+  function isHijriContext(norm, at, len) {
+    // لاحقة مباشرة: «1447هـ» → بعد التطبيع «1447ه»
+    var after = norm.slice(at + len, at + len + 2);
+    if (/^ه(?![ء-ي])/.test(after)) return true;
+    var win = norm.slice(Math.max(0, at - 30), at + len + 30);
+    for (var i = 0; i < HIJRI_HINT.length; i++) if (win.indexOf(HIJRI_HINT[i]) > -1) return true;
+    return false;
+  }
+
+  /* يعيد كل التواريخ في النص المطبَّع، بمواضعها، مع نوع التقويم. */
+  function findDates(norm) {
+    var out = [], m, re;
+
+    // YYYY-MM-DD / YYYY/MM/DD
+    re = /(\d{4})\s*[-\/\.]\s*(\d{1,2})\s*[-\/\.]\s*(\d{1,2})/g;
+    while ((m = re.exec(norm))) out.push(mk(m.index, m[0], +m[1], +m[2], +m[3]));
+
+    // DD-MM-YYYY / DD/MM/YYYY  (الترتيب السائد في المستندات العربية)
+    re = /(\d{1,2})\s*[-\/\.]\s*(\d{1,2})\s*[-\/\.]\s*(\d{4})/g;
+    while ((m = re.exec(norm))) out.push(mk(m.index, m[0], +m[3], +m[2], +m[1]));
+
+    // ١٥ رمضان ١٤٤٧  /  1 سبتمبر 2026
+    var names = Object.keys(GREG_MONTH_NO).concat(Object.keys(HIJRI_MONTH_NO))
+                  .sort(function (a, b) { return b.length - a.length; });
+    for (var i = 0; i < names.length; i++) {
+      var nm = names[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      re = new RegExp('(\\d{1,2})\\s+' + nm + '\\s+(\\d{3,4})', 'g');
+      while ((m = re.exec(norm))) {
+        var isH = HIJRI_MONTH_NO[names[i]] !== undefined;
+        var mo = isH ? HIJRI_MONTH_NO[names[i]] : GREG_MONTH_NO[names[i]];
+        out.push(mk(m.index, m[0], +m[2], mo, +m[1], isH));
+      }
+    }
+
+    function mk(idx, raw, y, mo, d, forceHijri) {
+      var hijri = forceHijri || (y < 1600 && y > 1300) || isHijriContext(norm, idx, raw.length);
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+      var ts = hijri ? hijriToUTC(y, mo, d) : Date.UTC(y, mo - 1, d);
+      return { at: idx, len: raw.length, raw: raw.trim(), ts: ts, hijri: !!hijri, approx: !!hijri };
+    }
+
+    return out.filter(Boolean).sort(function (a, b) { return a.at - b.at; });
+  }
+
+  /* ═══════════ ٤. استخراج المدد ═══════════ */
+
+  var NUM_WORDS = {};
+  (function () {
+    var raw = { 'واحد':1,'واحدة':1,'يوم واحد':1,'اثنان':2,'اثنين':2,'اثنتين':2,'يومين':2,'شهرين':2,'أسبوعين':2,'سنتين':2,
+      'ثلاثة':3,'ثلاث':3,'أربعة':4,'أربع':4,'خمسة':5,'خمس':5,'ستة':6,'ست':6,'سبعة':7,'سبع':7,
+      'ثمانية':8,'ثماني':8,'تسعة':9,'تسع':9,'عشرة':10,'عشر':10,'خمسة عشر':15,'خمسة عشرة':15,
+      'عشرين':20,'عشرون':20,'ثلاثين':30,'ثلاثون':30,'أربعين':40,'أربعون':40,'خمسين':50,'خمسون':50,
+      'ستين':60,'ستون':60,'سبعين':70,'ثمانين':80,'تسعين':90,'تسعون':90,'مائة':100,'مئة':100,'مائتين':200 };
+    Object.keys(raw).forEach(function (k) { NUM_WORDS[normStr(k)] = raw[k]; });
+  })();
+
+  var UNITS = [
+    { terms: normList(['يوم','يوماً','يوما','أيام','ايام','يومًا']), days: 1 },
+    { terms: normList(['أسبوع','اسبوع','أسابيع','اسابيع','أسبوعاً','اسبوعا']), days: 7 },
+    { terms: normList(['شهر','شهراً','شهرا','أشهر','اشهر','شهور']), days: 30 },
+    { terms: normList(['سنة','سنوات','عام','أعوام','اعوام','سنوياً','سنويا']), days: 365 }
+  ];
+
+  /* يبحث عن «خلال ٣٠ يومًا» و«خلال ثلاثين (30) يوماً» ونحوهما. */
+  function findDurations(norm) {
+    var out = [];
+    UNITS.forEach(function (u) {
+      u.terms.forEach(function (term) {
+        var re = new RegExp('(^|[^\\u0621-\\u064A])' + term + '($|[^\\u0621-\\u064A])', 'g'), m;
+        while ((m = re.exec(norm))) {
+          var at = m.index + m[1].length;
+          var before = norm.slice(Math.max(0, at - 40), at);
+          var n = null;
+          var dm = before.match(/(\d{1,4})\s*\)?\s*$/);            // رقم مباشر أو داخل قوسين
+          if (dm) n = +dm[1];
+          if (n === null) {
+            var keys = Object.keys(NUM_WORDS).sort(function (a, b) { return b.length - a.length; });
+            for (var i = 0; i < keys.length; i++) {
+              if (before.slice(-keys[i].length - 12).indexOf(keys[i]) > -1) { n = NUM_WORDS[keys[i]]; break; }
+            }
+          }
+          if (n === null || n <= 0 || n > 3650) continue;
+          out.push({ at: at, days: n * u.days, raw: norm.slice(Math.max(0, at - 24), at + term.length).trim() });
+        }
+      });
+    });
+    out.sort(function (a, b) { return a.at - b.at || b.days - a.days; });
+    var dedup = [];
+    out.forEach(function (d) {
+      var prev = dedup[dedup.length - 1];
+      if (prev && Math.abs(d.at - prev.at) <= 6) return;   // نفس العبارة بصيغة وحدة أخرى
+      dedup.push(d);
+    });
+    return dedup;
+  }
+
+  /* ═══════════ ٥. تقطيع الجُمل ═══════════ */
+
+  function splitSentences(norm) {
+    var out = [], start = 0, i;
+    for (i = 0; i < norm.length; i++) {
+      if ('.؟!؛\n'.indexOf(norm[i]) > -1) {
+        var t = norm.slice(start, i + 1).trim();
+        if (t.length > 12) out.push({ start: start, end: i + 1, text: t });
+        start = i + 1;
+      }
+    }
+    var last = norm.slice(start).trim();
+    if (last.length > 12) out.push({ start: start, end: norm.length, text: last });
+    // تجزئة الجمل الطويلة جدًا حتى لا يصير الاقتباس صفحة كاملة
+    var final = [];
+    out.forEach(function (s) {
+      if (s.text.length <= 420) { final.push(s); return; }
+      var cut = 0;
+      while (cut < s.text.length) {
+        var piece = s.text.slice(cut, cut + 380);
+        var sp = piece.lastIndexOf(' ');
+        if (sp > 200 && cut + 380 < s.text.length) piece = piece.slice(0, sp);
+        final.push({ start: s.start + cut, end: s.start + cut + piece.length, text: piece.trim() });
+        cut += piece.length;
+      }
+    });
+    return final;
+  }
+
+  /* ═══════════ ٦. الالتزامات والجزاءات ═══════════ */
+
+  var DEONTIC = normList([
+    'يجب','يتعين','يتوجب','يلتزم','تلتزم','ملزم','ملزمة','على الطرف','على المورد','على المقاول',
+    'يتعهد','تتعهد','يقر','لا يجوز','يحظر','يُحظر','يمتنع','يشترط','بشرط','شريطة','مطالب بـ',
+    'يقوم بـ','عليه أن','عليها أن','مسؤول عن','مسؤولة عن','يتحمل','تتحمل','وجب','ينبغي']);
+
+  var PENALTY_TIERS = [
+    { impact: 1.00, label: 'إنهاء أو سحب', terms: normList(['فسخ','إلغاء العقد','الغاء العقد','إنهاء العقد','سحب الترخيص','إلغاء الترخيص','شطب','إيقاف النشاط','ايقاف النشاط','الحرمان من']) },
+    { impact: 0.85, label: 'غرامة محددة',  terms: normList(['غرامة قدرها','غرامة مقدارها','شرط جزائي','غرامة تأخير','غرامة يومية']) },
+    { impact: 0.70, label: 'غرامة أو تعويض', terms: normList(['غرامة','جزاء','جزائية','تعويض','مخالفة','عقوبة','مساءلة','خصم']) },
+    { impact: 0.40, label: 'إنذار',        terms: normList(['إنذار','انذار','لفت نظر','تنبيه','ملاحظة كتابية']) }
+  ];
+
+  var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
+
+  function classifyPenalty(normSentence) {
+    for (var i = 0; i < PENALTY_TIERS.length; i++) {
+      var hit = hasAny(normSentence, PENALTY_TIERS[i].terms);
+      if (hit) {
+        var t = PENALTY_TIERS[i];
+        var money = normSentence.match(MONEY);
+        return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
+                 label: money ? t.label + ' (' + money[0].trim() + ')' : t.label, term: hit };
+      }
+    }
+    return { impact: 0.35, label: 'لا جزاء منصوص عليه', term: null };
+  }
+
+  var PARTIES = normList(['الطرف الأول','الطرف الثاني','المورد','المقاول','المستفيد','العميل',
+    'الجهة الحكومية','صاحب الترخيص','المرخص له','المستأجر','المؤجر','الشركة','الموظف','البائع','المشتري']);
+
+  /* ═══════════ ٧. قائمة البنود المعيارية ═══════════ */
+
+  var CLAUSES = [
+    { id:'conf',    title:'السرية وحماية المعلومات', impact:0.80, terms:normList(['سرية','السرية','معلومات سرية','عدم الإفصاح','عدم إفشاء','كتمان']) },
+    { id:'pdpl',    title:'حماية البيانات الشخصية',  impact:0.90, terms:normList(['البيانات الشخصية','بيانات شخصية','الخصوصية','حماية البيانات']) },
+    { id:'term',    title:'إنهاء العقد وفسخه',       impact:0.85, terms:normList(['إنهاء العقد','فسخ العقد','إنهاء الاتفاقية','الفسخ']) },
+    { id:'dispute', title:'تسوية المنازعات',          impact:0.75, terms:normList(['المنازعات','النزاع','التحكيم','المحكمة','الاختصاص القضائي','لجنة الفصل']) },
+    { id:'force',   title:'القوة القاهرة',            impact:0.55, terms:normList(['القوة القاهرة','قوة قاهرة','الظروف القاهرة']) },
+    { id:'ip',      title:'الملكية الفكرية',          impact:0.70, terms:normList(['الملكية الفكرية','حقوق الملكية','براءة اختراع','العلامة التجارية','حقوق النشر']) },
+    { id:'penalty', title:'الجزاءات والغرامات',       impact:0.80, terms:normList(['غرامة','الشرط الجزائي','جزاء','عقوبة']) },
+    { id:'warranty',title:'الضمان والكفالة',          impact:0.65, terms:normList(['ضمان','الكفالة','ضمان بنكي','خطاب ضمان']) },
+    { id:'ins',     title:'التأمين',                  impact:0.60, terms:normList(['التأمين','بوليصة','وثيقة تأمين']) },
+    { id:'amend',   title:'تعديل العقد وملاحقه',      impact:0.50, terms:normList(['تعديل العقد','ملحق','الملاحق','تعديل الاتفاقية']) },
+    { id:'notice',  title:'الإشعارات والمراسلات',     impact:0.45, terms:normList(['إشعار','إخطار','المراسلات','العنوان الوطني']) },
+    { id:'regs',    title:'الالتزام بالأنظمة السارية',impact:0.75, terms:normList(['الأنظمة','اللوائح','النظام السعودي','الجهات المختصة','الأنظمة النافذة']) },
+    { id:'liab',    title:'حدود المسؤولية',           impact:0.70, terms:normList(['حدود المسؤولية','حد المسؤولية','المسؤولية عن الأضرار','إعفاء من المسؤولية']) },
+    { id:'assign',  title:'التنازل عن العقد',         impact:0.50, terms:normList(['التنازل','تنازل الطرف','حوالة الحق','التعاقد من الباطن']) },
+    { id:'pay',     title:'الدفع والمستحقات',         impact:0.70, terms:normList(['الدفع','السداد','الفاتورة','المستحقات','الدفعة']) }
+  ];
+
+  var VAGUE = [
+    { term:'في وقت مناسب',       why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
+    { term:'في أقرب وقت',        why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
+    { term:'بالسرعة الممكنة',    why:'لا يحدد موعدًا يمكن قياس التأخر عنه' },
+    { term:'بشكل دوري',          why:'لا يحدد دورية محددة (شهري؟ سنوي؟)' },
+    { term:'بصورة منتظمة',       why:'لا يحدد دورية محددة' },
+    { term:'من وقت لآخر',        why:'يترك التوقيت مفتوحًا بلا سقف' },
+    { term:'حسب الحاجة',         why:'يترك التقدير لطرف واحد بلا معيار' },
+    { term:'عند الاقتضاء',       why:'يترك التقدير لطرف واحد بلا معيار' },
+    { term:'حسب ما يراه مناسباً',why:'سلطة تقديرية مطلقة بلا ضابط' },
+    { term:'ما يلزم',            why:'نطاق الالتزام غير محدد' },
+    { term:'الجهة المختصة',      why:'لم تُسمَّ الجهة صراحة' }
+  ].map(function (v) { return { term: normStr(v.term), why: v.why, raw: v.term }; });
+
+  /* ═══════════ ٨. حساب الخطر ═══════════ */
+
+  function timeDecay(d) {
+    if (d === null || d === undefined) return 1.0;
+    if (d < 0)  return 1.60;
+    if (d < 7)  return 1.45;
+    if (d < 14) return 1.30;
+    if (d < 30) return 1.15;
+    if (d < 90) return 1.00;
+    return 0.85;
+  }
+  function probFromDays(d) {
+    if (d === null || d === undefined) return 0.50;   // غياب الموعد نفسه سببٌ للتأخر
+    if (d < 0)  return 0.95;
+    if (d < 7)  return 0.75;
+    if (d < 30) return 0.55;
+    if (d < 90) return 0.35;
+    return 0.20;
+  }
+  function urgencyLabel(d) {
+    if (d === null || d === undefined) return 'غير مؤرّخ';
+    if (d < 0)  return 'متجاوز';
+    if (d < 14) return 'حرج';
+    if (d < 45) return 'قريب';
+    return 'مراقبة';
+  }
+  var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
+  function itemRisk(p, i, d) {
+    return Math.round(clamp(clamp(p, 0, 1) * clamp(i, 0, 1) * timeDecay(d) * 100, 0, 100));
+  }
+  /* الدرجة الكلية: ٦٠٪ من أعلى بند + ٤٠٪ من الجذر التربيعي للمتوسط.
+     الحد الأعلى يمنع بندًا حرجًا واحدًا من أن تبتلعه بنود هادئة —
+     وهو ما لا يفعله الجذر التربيعي وحده. */
+  function aggregateRisk(items) {
+    if (!items.length) return 0;
+    var max = Math.max.apply(null, items);
+    var rms = Math.sqrt(items.reduce(function (a, x) { return a + x * x; }, 0) / items.length);
+    return Math.round(max * 0.6 + rms * 0.4);
+  }
+  function sevFromRisk(r) { return r >= 66 ? 'critical' : r >= 33 ? 'medium' : 'low'; }
+
+  /* ═══════════ ٩. التحليل ═══════════ */
+
+  var STOP = normList(['من','إلى','على','في','عن','مع','هذا','هذه','ذلك','التي','الذي','أن','إن',
+    'ما','لا','قد','كل','بين','عند','بعد','قبل','أو','و','ثم','كما','حيث','وفق','وفقاً','بموجب','يتم','تم']);
+
+  /* ألفاظ الإلزام وأسماء الأطراف تتكرر في كل بند، فوجودها لا يدل على تغطية
+     الموضوع. نستبعدها حتى تُقارَن الكلمات الموضوعية وحدها. */
+  var STRUCTURAL = null;
+  function structuralWords() {
+    if (STRUCTURAL) return STRUCTURAL;
+    STRUCTURAL = {};
+    STOP.concat(DEONTIC, PARTIES).forEach(function (t) {
+      t.split(' ').forEach(function (w) { if (w.length > 1) STRUCTURAL[w] = 1; });
+    });
+    return STRUCTURAL;
+  }
+  function contentWords(normText) {
+    var sw = structuralWords();
+    return normText.split(/[^ء-ي0-9a-z]+/).filter(function (w) {
+      return w.length > 2 && !sw[w];
+    });
+  }
+
+  function analyze(opts) {
+    var text = opts.docText || '';
+    var refText = opts.refText || '';
+    var today = todayUTC(opts.todayISO);
+    var focus = normList((opts.context || '').split(/[،,\n]/).filter(Boolean));
+
+    var nm = normMap(text);
+    var norm = nm.norm, map = nm.map;
+    var toOrig = function (a, b) {
+      if (!map.length) return { start: 0, end: 0 };
+      return { start: map[clamp(a, 0, map.length - 1)],
+               end: map[clamp(b - 1, 0, map.length - 1)] + 1 };
+    };
+    var quoteAt = function (a, b) { var r = toOrig(a, b); return text.slice(r.start, r.end).trim(); };
+
+    var sentences = splitSentences(norm);
+    var dates = findDates(norm);
+    var durations = findDurations(norm);
+
+    /* تاريخ المرجع (تاريخ التحرير) — أول تاريخ في مقدمة المستند، تُسنَد إليه المدد النسبية */
+    var anchor = null;
+    var headEnd = Math.max(1200, Math.floor(norm.length * 0.12));
+    for (var ai = 0; ai < dates.length; ai++) {
+      if (dates[ai].at < headEnd) { anchor = dates[ai]; break; }
+    }
+
+    /* ── الالتزامات ── */
+    var obligations = [];
+    sentences.forEach(function (s) {
+      var marker = hasAny(s.text, DEONTIC);
+      if (!marker) return;
+
+      // أقرب تاريخ أو مدة داخل الجملة نفسها
+      var d = null, source = null, approx = false;
+      for (var i = 0; i < dates.length; i++) {
+        if (dates[i].at >= s.start && dates[i].at < s.end) {
+          d = dates[i].ts; source = dates[i].raw; approx = dates[i].approx; break;
+        }
+      }
+      if (d === null) {
+        for (var j = 0; j < durations.length; j++) {
+          if (durations[j].at >= s.start && durations[j].at < s.end) {
+            if (anchor) { d = anchor.ts + durations[j].days * DAY; approx = anchor.approx; }
+            source = durations[j].raw + (anchor ? ' (من ' + anchor.raw + ')' : ' (بلا تاريخ مرجعي)');
+            break;
+          }
+        }
+      }
+
+      var days = d === null ? null : Math.round((d - today) / DAY);
+      var pen = classifyPenalty(s.text);
+      var party = hasAny(s.text, PARTIES);
+      var q = quoteAt(s.start, s.end);
+      obligations.push({
+        quote: q, marker: marker, party: party,
+        rawDeadline: source, deadlineTS: d, approxDate: approx,
+        daysRemaining: days, urgency: urgencyLabel(days),
+        penalty: pen.label, impact: pen.impact,
+        probability: probFromDays(days),
+        risk: itemRisk(probFromDays(days), pen.impact, days),
+        focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
+        _s: s.start, _e: s.end
+      });
+    });
+    obligations.forEach(function (o) { o.severity = sevFromRisk(o.risk); });
+
+    /* ── الفجوات ── */
+    var gaps = [];
+    function pushGap(g) {
+      g.risk = itemRisk(g.probability, g.impact, g.daysRemaining === undefined ? null : g.daysRemaining);
+      g.severity = sevFromRisk(g.risk);
+      g.decay = timeDecay(g.daysRemaining === undefined ? null : g.daysRemaining);
+      g.key = g.type + '|' + normStr(g.title).slice(0, 60);
+      gaps.push(g);
+    }
+
+    // (أ) مواعيد متجاوزة
+    obligations.filter(function (o) { return o.daysRemaining !== null && o.daysRemaining < 0; })
+      .forEach(function (o) {
+        pushGap({ type: 'موعد متجاوز', title: 'موعد انقضى منذ ' + Math.abs(o.daysRemaining) + ' يومًا',
+          description: 'التزام مؤرّخ مضى موعده ولم يرد في المستند ما يفيد تنفيذه أو تمديده.' +
+            (o.penalty !== 'لا جزاء منصوص عليه' ? ' الجزاء المنصوص: ' + o.penalty + '.' : ''),
+          recommendation: 'وثّق التنفيذ أو اطلب تمديدًا كتابيًا قبل تفعيل الجزاء.',
+          evidence: o.quote, evidenceType: 'quote',
+          probability: o.probability, impact: o.impact, daysRemaining: o.daysRemaining });
+      });
+
+    // (ب) التزام بلا موعد
+    obligations.filter(function (o) { return o.daysRemaining === null; })
+      .forEach(function (o) {
+        pushGap({ type: 'التزام بلا موعد', title: 'التزام غير محدد المدة',
+          description: 'الجملة تحمل صيغة إلزام («' + o.marker + '») دون تاريخ أو مدة يمكن قياس التأخر عنها.',
+          recommendation: 'أضف موعدًا صريحًا أو مدة محسوبة من تاريخ محدد.',
+          evidence: o.quote, evidenceType: 'quote',
+          probability: 0.50, impact: o.impact, daysRemaining: null });
+      });
+
+    // (ج) صياغة فضفاضة
+    VAGUE.forEach(function (v) {
+      var idx = norm.indexOf(v.term);
+      if (idx === -1) return;
+      var host = sentences.filter(function (s) { return idx >= s.start && idx < s.end; })[0];
+      pushGap({ type: 'صياغة فضفاضة', title: 'عبارة غير قابلة للقياس: «' + v.raw + '»',
+        description: v.why + '.', recommendation: 'استبدلها بمدة أو تاريخ أو معيار قابل للتحقق.',
+        evidence: host ? quoteAt(host.start, host.end) : quoteAt(idx, idx + v.term.length + 60),
+        evidenceType: 'quote', probability: 0.55, impact: 0.55, daysRemaining: null });
+    });
+
+    // (د) بنود معيارية غائبة
+    var clauseReport = CLAUSES.map(function (c) {
+      var hit = hasAny(norm, c.terms);
+      return { id: c.id, title: c.title, present: !!hit, hit: hit, impact: c.impact };
+    });
+    clauseReport.filter(function (c) { return !c.present; }).forEach(function (c) {
+      pushGap({ type: 'بند مفقود', title: 'لا يوجد بند: ' + c.title,
+        description: 'بحثنا عن كل الصيغ الشائعة لهذا البند في المستند ولم نجد أيًّا منها.',
+        recommendation: 'أضف بندًا يعالج «' + c.title + '» أو وثّق سبب استبعاده.',
+        evidence: null, evidenceType: 'absence',
+        probability: 0.60, impact: c.impact, daysRemaining: null });
+    });
+
+    gaps.sort(function (a, b) { return b.risk - a.risk; });
+
+    /* ── التنبؤات: كل التزام مؤرّخ لم يحن موعده بعد ── */
+    var preds = obligations
+      .filter(function (o) { return o.daysRemaining !== null && o.daysRemaining >= 0; })
+      .sort(function (a, b) { return a.daysRemaining - b.daysRemaining; })
+      .map(function (o) {
+        return { title: 'يستحق خلال ' + o.daysRemaining + ' يومًا',
+          trigger: o.rawDeadline || '—', approxDate: o.approxDate,
+          deadlineISO: new Date(o.deadlineTS).toISOString().slice(0, 10),
+          consequence: o.penalty === 'لا جزاء منصوص عليه'
+            ? 'لم ينص المستند على جزاء صريح لهذا التأخر — الأثر تعاقدي عام.'
+            : 'عند التأخر يترتب: ' + o.penalty + '.',
+          recommendation: o.daysRemaining < 14
+            ? 'ابدأ التنفيذ الآن — النافذة أقل من أسبوعين.'
+            : 'أدرجه في خطة الربع وحدّد مسؤولًا.',
+          evidence: o.quote, daysRemaining: o.daysRemaining,
+          risk: o.risk, severity: o.severity };
+      });
+
+    /* ── التغطية مقابل المرجع ── */
+    var coverage = null;
+    if (refText && refText.trim()) {
+      var rn = normMap(refText), rSent = splitSentences(rn.norm);
+      var docWords = sentences.map(function (s) { return contentWords(s.text); });
+      var reqs = rSent.filter(function (s) { return hasAny(s.text, DEONTIC); }).map(function (s) {
+        var need = contentWords(s.text);
+        var best = 0, bestIdx = -1;
+        docWords.forEach(function (dw, i) {
+          if (!need.length) return;
+          var hit = need.filter(function (w) { return dw.indexOf(w) > -1; }).length / need.length;
+          if (hit > best) { best = hit; bestIdx = i; }
+        });
+        return { requirement: refText.slice(rn.map[s.start], rn.map[Math.min(s.end, rn.map.length) - 1] + 1).trim(),
+                 met: best >= COVER_THRESHOLD, score: Math.round(best * 100),
+                 matched: bestIdx > -1 && best >= COVER_THRESHOLD ? quoteAt(sentences[bestIdx].start, sentences[bestIdx].end) : null };
+      });
+      if (reqs.length) {
+        coverage = { requirements: reqs,
+          score: Math.round(reqs.filter(function (r) { return r.met; }).length / reqs.length * 100) };
+        reqs.filter(function (r) { return !r.met; }).forEach(function (r) {
+          pushGap({ type: 'متطلب غير مغطى', title: 'متطلب من المرجع بلا ما يقابله',
+            description: 'أقوى تطابق لفظي وجدناه في مستندك كان ' + r.score + '٪ فقط.',
+            recommendation: 'أضف بندًا يقابل هذا المتطلب صراحةً.',
+            evidence: r.requirement, evidenceType: 'reference',
+            probability: 0.60, impact: 0.75, daysRemaining: null });
+        });
+        gaps.sort(function (a, b) { return b.risk - a.risk; });
+      }
+    }
+
+    var stats = { critical: 0, medium: 0, low: 0 };
+    gaps.forEach(function (g) { stats[g.severity]++; });
+
+    var riskScore = aggregateRisk(gaps.map(function (g) { return g.risk; })
+                      .concat(preds.map(function (p) { return p.risk; })));
+
+    return {
+      riskScore: riskScore, stats: stats, gaps: gaps, preds: preds,
+      obligations: obligations.sort(function (a, b) {
+        var x = a.daysRemaining === null ? 1e9 : a.daysRemaining;
+        var y = b.daysRemaining === null ? 1e9 : b.daysRemaining;
+        return x - y;
+      }),
+      clauseReport: clauseReport, coverage: coverage,
+      anchorDate: anchor ? { raw: anchor.raw, iso: new Date(anchor.ts).toISOString().slice(0, 10), approx: anchor.approx } : null,
+      counts: { sentences: sentences.length, dates: dates.length, durations: durations.length, chars: text.length },
+      fingerprint: fingerprint(norm),
+      generatedAt: Date.now()
+    };
+  }
+
+  function fingerprint(norm) {
+    var n = norm.slice(0, 40000), h = 0;
+    for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) | 0;
+    return 'fp' + Math.abs(h).toString(36) + '_' + n.length;
+  }
+
+  /* موضع اقتباس في النص الأصلي — لإبرازه في العارض */
+  function locateQuote(sourceText, quote) {
+    if (!quote || !sourceText) return null;
+    var nm = normMap(sourceText), q = normStr(quote);
+    if (q.length < 8) return null;
+    var k = nm.norm.indexOf(q);
+    if (k === -1) {
+      var head = q.slice(0, 40);
+      if (head.length < 12) return null;
+      k = nm.norm.indexOf(head);
+      if (k === -1) return null;
+      q = head;
+    }
+    return { start: nm.map[k], end: nm.map[Math.min(k + q.length - 1, nm.map.length - 1)] + 1 };
+  }
+
+  return {
+    analyze: analyze, locateQuote: locateQuote, normStr: normStr, normMap: normMap,
+    findDates: findDates, findDurations: findDurations, splitSentences: splitSentences,
+    hijriToUTC: hijriToUTC, todayUTC: todayUTC,
+    timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk,
+    sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
+    CLAUSES: CLAUSES, VAGUE: VAGUE, DEONTIC: DEONTIC
+  };
+});

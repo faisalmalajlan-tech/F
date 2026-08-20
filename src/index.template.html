@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src blob: data:; worker-src blob:">
+<title>نذير — ذكاء الامتثال الاستباقي</title>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="nav-left">
+    <button class="burger" id="burgerBtn" type="button" aria-label="فتح التنقل">&#9776;</button>
+    <div class="avatar">ن</div>
+    <div class="userinfo"><span class="un">المستخدم</span><span class="ur">مدير الامتثال</span></div>
+  </div>
+  <div style="display:flex;align-items:center">
+    <span class="offline" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق">● يعمل بلا إنترنت</span>
+    <button class="nav-brand" id="brandHome" type="button">
+      <div><div class="nm">نذير</div><div class="sub">ذكاء الامتثال الاستباقي</div></div>
+      <div class="brandmark">ن</div>
+    </button>
+  </div>
+</nav>
+
+<main class="page" id="pageContent"></main>
+
+<div class="navoverlay" id="navOverlay">
+  <div class="scrim" id="navScrim"></div>
+  <nav class="navpanel" aria-label="التنقّل">
+    <div class="hdr">التنقّل</div>
+    <button class="navlink" type="button" data-r="dash">الرئيسية</button>
+    <button class="navlink" type="button" data-r="upload">رفع المستندات</button>
+    <button class="navlink" type="button" data-r="gaps">الفجوات</button>
+    <button class="navlink" type="button" data-r="risk">المخاطر والبنود</button>
+    <button class="navlink" type="button" data-r="remed">المعالجة</button>
+    <button class="navlink" type="button" data-r="predict">المواعيد القادمة</button>
+    <button class="navlink" type="button" data-r="report">التقرير</button>
+  </nav>
+</div>
+
+<div id="proc">
+  <div class="proc-wrap">
+    <div class="proc-orb">ن</div>
+    <h2 style="font-size:18px;font-weight:800;margin-bottom:7px">نذير يقرأ مستندك</h2>
+    <p style="color:var(--text2);font-size:12px;margin-bottom:20px;line-height:1.7">
+      التحليل يجري داخل جهازك. كل رقم تراه محسوب من نصّك، لا مقدَّر.</p>
+    <div class="proc-steps" id="procSteps"></div>
+  </div>
+</div>
+
+<div id="viewer">
+  <div class="scrim" id="viewScrim"></div>
+  <div class="viewpanel">
+    <div class="vh"><div class="t">المستند الأصلي</div>
+      <button id="viewClose" type="button" aria-label="إغلاق">✕</button></div>
+    <div class="viewbody" id="viewBody"></div>
+  </div>
+</div>
+
+<script>/*__PDFJS__*/</script>
+<script>
+/* عامل pdf.js مضمَّن كـ Blob — لا يوجد أي طلب شبكة */
+(function () {
+  try {
+    var b64 = '/*__WORKER_B64__*/';
+    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([bytes], { type: 'application/javascript' }));
+    if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = url;
+  } catch (e) { /* قراءة PDF ستتعطل، وبقية التطبيق يعمل */ }
+})();
+</script>
+<script>/*__ENGINE__*/</script>
+<script>/*__APP__*/</script>
+</body>
+</html>
