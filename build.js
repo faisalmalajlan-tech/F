@@ -1,6 +1,7 @@
 /* يبني dist/nadheer.html — ملف واحد مكتفٍ بذاته يعمل من file:// بلا إنترنت */
 const fs = require('fs'), path = require('path');
 const rd = p => fs.readFileSync(path.join(__dirname, p), 'utf8');
+const b64 = p => fs.readFileSync(path.join(__dirname, p)).toString('base64');
 
 const out = rd('src/index.template.html')
   .replace('/*__CSS__*/', () => rd('src/styles.css')
@@ -13,7 +14,12 @@ const out = rd('src/index.template.html')
   .replace('/*__AUDIT__*/',      () => rd('src/audit.js'))
   .replace('/*__STORE__*/',      () => rd('src/store.js'))
   .replace('/*__CONFLICTS__*/',  () => rd('src/conflicts.js'))
-  .replace('/*__APP__*/',        () => rd('src/app.js'));
+  .replace('/*__APP__*/',        () => rd('src/app.js'))
+  /* الخلفية المتحركة تُضمَّن كبيانات: الملف يبقى مكتفيًا بذاته بلا طلب شبكة.
+     ضُغطت من ٢٫٥ ميجابايت إلى ٠٫٣٧ — فهي خلف حجابٍ معتم، والدقة العالية ضياع. */
+  .replace('__BACKDROP_WEBM__',  () => 'data:video/webm;base64,' + b64('src/assets/backdrop.webm'))
+  .replace('__BACKDROP__',       () => 'data:video/mp4;base64,' + b64('src/assets/backdrop.mp4'))
+  .replace('__BACKDROP_POSTER__',() => 'data:image/jpeg;base64,' + b64('src/assets/backdrop-poster.jpg'));
 
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(__dirname, 'dist/nadheer.html'), out);
@@ -36,7 +42,7 @@ if (bad.length) { console.error('✗ مراجع شبكية في كودنا:\n  '
 // خط الدفاع الفعلي هو الـCSP في القالب — يمنع المتصفحُ أي اتصال خارجي حتى لو استُدعي.
 const csp = rd('src/index.template.html').match(/Content-Security-Policy" content="([^"]+)"/);
 if (!csp) { console.error('✗ وسم CSP مفقود من القالب'); process.exit(1); }
-['default-src \'none\'', 'connect-src blob: data:'].forEach(d => {
+['default-src \'none\'', 'connect-src blob: data:', 'media-src data:'].forEach(d => {
   if (!csp[1].includes(d)) { console.error('✗ CSP لا يتضمن: ' + d); process.exit(1); }
 });
 

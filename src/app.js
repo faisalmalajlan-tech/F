@@ -63,6 +63,23 @@
       '<circle cx="12" cy="16.5" r="1.45" fill="currentColor" stroke="none"/></svg>';
   }
 
+  /* ═══ الخلفية المتحركة ═══
+     تظهر في البوابة وفي الرئيسية فقط — لا خلف جداول التحليل، فالحركة
+     خلف نصٍّ يُقرأ تشتّت. عنصرٌ واحد يُنقل لا يُعاد إنشاؤه، حتى لا
+     يُفكّ ترميز الفيديو من جديد في كل تنقّل. */
+  function backdrop(on, where) {
+    var bd = $('backdrop'); if (!bd) return;
+    bd.classList.toggle('on', !!on);
+    var v = $('backdropVid');
+    if (v) {
+      // إيقافه وهو مخفيّ يوفّر فكّ ترميزٍ متصلًا بلا فائدة
+      if (on) { var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); }
+      else v.pause();
+    }
+    var gate = $('gate');
+    if (gate) gate.classList.toggle('over-backdrop', on && where === 'gate');
+  }
+
   /* ═══ الجلسة ═══ */
   var ADMIN_KEY = 'nadheer:adminhash', DEFAULT_CODE = '1234';
   function codeHash(s) {
@@ -80,6 +97,8 @@
   var gateRole = 'user';
   function renderGate() {
     $('gate').classList.add('open');
+    document.body.classList.add('gated');
+    backdrop(true, 'gate');
     $('gate').innerHTML = '<div class="gate-card">' +
       '<div class="gate-mark">' + logo(40, 1.05) + '</div>' +
       '<h1>نذير</h1><div class="tag">ذكاء الامتثال الاستباقي</div>' +
@@ -111,6 +130,8 @@
       AU.log({ kind: 'auth', actor: S.session.name, title: 'تسجيل دخول',
                detail: isAdmin() ? 'بصلاحية مدير النظام' : 'بصلاحية مستخدم' });
       $('gate').classList.remove('open');
+      document.body.classList.remove('gated');
+      backdrop(false);
       startApp();
     };
     $('gateGo').addEventListener('click', go);
@@ -322,6 +343,7 @@
   /* ═══════════ ١. الرئيسية ═══════════ */
   function renderHome() {
     var el = $('pageContent');
+    backdrop(true, 'home');
     if (!S.docs.length) {
       el.innerHTML = banner() + '<div class="card" style="text-align:center;padding:46px 22px">' +
         '<div style="color:var(--gold);display:flex;justify-content:center;margin-bottom:18px">' + logo(38, 1) + '</div>' +
@@ -356,7 +378,7 @@
 
     /* ١ — الحالة: مؤشر قوسي بدل رقمٍ مجرّد، ومنحنى المحفظة بجانبه */
     var series = portfolioSeries();
-    html += '<div class="risk-hero"><div class="top">' +
+    html += '<div class="risk-hero over-backdrop"><div class="top">' +
       '<div style="flex:1;min-width:180px">' +
       '<div class="eyebrow">لوحة الامتثال · ' + S.docs.length + ' مستند · ' + ST.today() + '</div>' +
       '<div class="risk-title">وضعك اليوم<br><b>' + riskWord(pr) + '</b></div>' +
@@ -725,6 +747,7 @@
       '<path d="' + d + '" stroke="' + c + '" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></svg>';
   }
   function renderDocs() {
+    backdrop(false);
     var el = $('pageContent'), u = ST.usage();
     var html = banner() + '<div class="eyebrow">المحفظة</div><h2 class="pagetitle">المستندات</h2>' +
       '<p class="pagesub">محفوظة في هذا الجهاز، ويُعاد حساب خطر كل واحد بتاريخ اليوم عند كل فتح.</p>' +
@@ -766,6 +789,7 @@
   var TABS = [['sum', 'نظرة عامة'], ['gaps', 'الفجوات'], ['dl', 'المواعيد'],
               ['fix', 'التعديلات'], ['rep', 'التقرير']];
   function renderDoc() {
+    backdrop(false);
     var el = $('pageContent'), doc = ST.get(S.openDoc);
     if (!doc) { go('docs'); return; }
     var r = S.analyses[doc.id] || analyzeDoc(doc);
@@ -1218,6 +1242,7 @@
 
   /* ═══════════ ٤. خطة المعالجة ═══════════ */
   function renderPlan() {
+    backdrop(false);
     var el = $('pageContent'), tasks = allTasks();
     var counts = { open: 0, doing: 0, done: 0 };
     tasks.forEach(function (t) {
@@ -1269,6 +1294,7 @@
 
   /* ═══════════ الرفع ═══════════ */
   function renderUpload() {
+    backdrop(false);
     var el = $('pageContent');
     el.innerHTML = banner() +
       '<button class="backlink" type="button" data-r="docs">' + ico('back', 13) + ' المستندات</button>' +
@@ -1475,6 +1501,7 @@
       '<button class="btn ghost sm" type="button" data-add="' + id + '">إضافة</button></div>';
   }
   function renderAdmin() {
+    backdrop(false);
     var el = $('pageContent'), c = draft();
     var html = '<div class="eyebrow">الإدارة</div><h2 class="pagetitle">إعدادات المحرك</h2>' +
       '<p class="pagesub">كل جدول هنا يغيّر نتائج التحليل مباشرة، وتُعاد كل المستندات المحفوظة بالحساب الجديد. ' +
@@ -1628,6 +1655,7 @@
 
   /* ═══ سجل التتبّع ═══ */
   function renderAudit() {
+    backdrop(false);
     var el = $('pageContent'), st = AU.stats(), list = AU.list({ kind: S.auditFilter, q: S.auditQ });
     var html = '<div class="eyebrow">الإدارة</div><h2 class="pagetitle">سجل التتبّع</h2>' +
       '<p class="pagesub">كل تحليل وتعديل ودخول وتحديث مهمة مقيَّد هنا. ابحث بكود التحليل (NR-…) أو بكود بند (G-…).</p>' +
@@ -1672,6 +1700,7 @@
 
   /* ═══ الأمان ═══ */
   function renderSecurity() {
+    backdrop(false);
     var el = $('pageContent'), u = ST.usage();
     el.innerHTML = '<div class="eyebrow">الإدارة</div><h2 class="pagetitle">الأمان والدخول</h2>' +
       '<p class="pagesub">تغيير رمز المدير، وحدود ما يستطيع هذا التطبيق حمايته.</p>' +

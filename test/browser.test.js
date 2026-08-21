@@ -43,6 +43,22 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(!(await page.locator('#gate.open').isVisible()), 'الدخول العادي يعمل');
   ok((await navCount()) === 3, 'المستخدم العادي يرى ٣ صفحات فقط (كانت ٧)');
 
+  console.log('\n— الخلفية المتحركة —');
+  /* فيديو حقيقي لا صورة: نتحقق أن الزمن يتقدّم فعلًا */
+  const bdInfo = await page.evaluate(() => {
+    const v = document.getElementById('backdropVid');
+    return v ? { tag: v.tagName, w: v.videoWidth, dur: v.duration, paused: v.paused,
+                 src: v.currentSrc.slice(0, 16) } : null;
+  });
+  ok(bdInfo && bdInfo.tag === 'VIDEO', 'عنصر فيديو لا صورة');
+  ok(bdInfo && bdInfo.w > 0 && bdInfo.dur > 1,
+     'الفيديو مفكوك الترميز: ' + (bdInfo || {}).w + 'px · ' + ((bdInfo || {}).dur || 0).toFixed(1) + 'ث');
+  ok(bdInfo && /^data:video/.test(bdInfo.src), 'مضمَّن كبيانات — لا طلب شبكة');
+  const bt1 = await page.evaluate(() => document.getElementById('backdropVid').currentTime);
+  await page.waitForTimeout(900);
+  const bt2 = await page.evaluate(() => document.getElementById('backdropVid').currentTime);
+  ok(bt2 > bt1, 'الزمن يتقدّم ⇒ يدور فعلًا: ' + bt1.toFixed(2) + ' → ' + bt2.toFixed(2));
+
   console.log('\n— حفظ المستند —');
   await addDoc('إجراءات أمن المعلومات', PROC, POL);
   ok(await page.locator('.pagetitle').first().isVisible(), 'ينتقل لصفحة المستند بعد التحليل');
@@ -231,6 +247,25 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(still.arcOff > 0.5, 'والقوس يبقى عند قيمته لا عند الصفر');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.reload(); await page.waitForTimeout(700);
+
+  console.log('\n— الخلفية تظهر وتُطفأ بحسب الصفحة —');
+  const bdState = async () => page.evaluate(() => ({
+    on: document.getElementById('backdrop').classList.contains('on'),
+    paused: document.getElementById('backdropVid').paused
+  }));
+  await nav('home');
+  let bs = await bdState();
+  ok(bs.on && !bs.paused, 'تدور في الرئيسية');
+  await nav('docs');
+  bs = await bdState();
+  /* تُطفأ خلف الجداول: حركةٌ خلف نصٍّ يُقرأ تشتّت، وفكُّ ترميزٍ بلا فائدة */
+  ok(!bs.on && bs.paused, 'تُطفأ وتتوقف في صفحة المستندات');
+  await nav('plan');
+  bs = await bdState();
+  ok(!bs.on && bs.paused, 'وفي خطة المعالجة كذلك');
+  await nav('home');
+  bs = await bdState();
+  ok(bs.on && !bs.paused, 'وتعود بالرجوع إلى الرئيسية');
 
   console.log('\n— مستند ثالث والمحفظة —');
   await nav('docs'); await addDoc('عقد تشغيل', PROC.replace('2026/01/15', '2026/03/20'));
