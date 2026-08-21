@@ -6,7 +6,7 @@
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
-            draft: { doc1: '', doc2: '', ctx: '', name: '' }, files: {},
+            draft: { doc1: '', doc2: '', ctx: '', name: '', type: 'فحص كل البنود' }, files: {},
             gapFilter: 'all', planFilter: 'open', auditFilter: 'all', auditQ: '',
             storageOK: true, sourceText: '', banner: null };
 
@@ -121,7 +121,7 @@
     AU.log({ kind: 'auth', actor: S.session ? S.session.name : '—', title: 'تسجيل خروج', detail: '' });
     try { window.sessionStorage.removeItem('nadheer:session'); } catch (e) {}
     S.session = null; S.analyses = {}; S.openDoc = null;
-    S.draft = { doc1: '', doc2: '', ctx: '', name: '' }; S.files = {};
+    S.draft = { doc1: '', doc2: '', ctx: '', name: '', type: 'فحص كل البنود' }; S.files = {};
     renderGate();
   }
 
@@ -129,7 +129,8 @@
      كل مستند يُعاد تحليله بتاريخ اليوم عند كل فتح. الخطر يتحرك وحده مع
      اقتراب المواعيد، وتُسجَّل نقطة واحدة في تاريخه لكل يوم.            */
   function analyzeDoc(doc) {
-    var res = E.analyze({ docText: doc.text, refText: doc.refText, context: doc.context, config: S.cfg });
+    var res = E.analyze({ docText: doc.text, refText: doc.refText, context: doc.context,
+                          config: S.cfg, docType: doc.docType });
     res.docId = doc.id; res.docName = doc.name; res.caseCode = doc.caseCode;
 
     /* التعارض المباشر أخطر من الفجوة: بندٌ في سياستك يفعل ما يمنعه المرجع.
@@ -200,13 +201,16 @@
   /* أرقام الداشبورد التنفيذي — تُجمَع من كل المستندات */
   function exec() {
     var openGaps = 0, doneGaps = 0, totalGaps = 0, conflicts = 0;
-    var accruing = [], upcoming = [];
+    var accruing = [], upcoming = [], uncounted = [];
     S.docs.forEach(function (d) {
       var r = S.analyses[d.id]; if (!r) return;
       totalGaps += r.gaps.length; openGaps += r.openGaps.length; doneGaps += r.doneCount;
       conflicts += (r.conflicts || []).length;
       r.obligations.forEach(function (o) {
-        if (o.exposure === null || o.exposure === undefined) return;
+        if (o.exposure === null || o.exposure === undefined) {
+          if (o.exposureNote) uncounted.push({ doc: d, o: o });   // سقف نسبي بلا قيمة عقد
+          return;
+        }
         (o.exposureAccruing ? accruing : upcoming).push({ doc: d, o: o });
       });
     });
@@ -216,7 +220,7 @@
     return {
       openGaps: openGaps, doneGaps: doneGaps, totalGaps: totalGaps, conflicts: conflicts,
       pctDone: totalGaps ? Math.round(doneGaps / totalGaps * 100) : 0,
-      accruing: accruing, upcoming: upcoming,
+      accruing: accruing, upcoming: upcoming, uncounted: uncounted,
       accruingSum: sum(accruing), upcomingSum: sum(upcoming),
       nextFine: upcoming.length ? upcoming[0] : null
     };
@@ -390,8 +394,17 @@
               '<i>' + esc(f.doc.name) + '</i></span></button>';
           }).join('');
       }
+      if (x.uncounted.length) {
+        html += '<div class="grouplbl">غير محسوبة</div>' +
+          x.uncounted.slice(0, 3).map(function (f) {
+            return '<button class="linkrow" type="button" data-r="doc" data-id="' + f.doc.id + '">' +
+              '<span class="lr-tag" style="color:var(--text3);border-color:var(--line2)">؟</span>' +
+              '<span class="lr-body"><b>' + esc(f.o.exposureNote) + '</b><i>' + esc(f.doc.name) + '</i></span></button>';
+          }).join('');
+      }
       html += '<div class="note">تقدير مستخرج من نصوص الجزاءات، لا التزام محاسبي. ' +
-        'الغرامة اليومية تُضرب في أيام التأخر.</div></div>';
+        'الغرامة اليومية تُضرب في أيام التأخر، وتُقصر على السقف المنصوص إن وُجد. ' +
+        'الغرامة ذات السقف النسبي لا تُحسب ما لم تُذكر قيمة العقد في المستند.</div></div>';
     }
 
     /* ٤ — المتجاوز */
@@ -527,7 +540,11 @@
       '<div style="font-size:13px;line-height:2.15;color:var(--text2);font-weight:300">' + esc(summary(r)) + '</div></div>';
 
     html += '<div class="card"><div class="sectitle">البنود المعيارية — ' + present + '/' + r.clauseReport.length + '</div>' +
-      '<div class="clause-grid">' + r.clauseReport.map(function (c) {
+      '<label class="field-label" for="dType" style="margin-top:0">نوع المستند</label>' +
+      '<select id="dType">' + Object.keys(S.cfg.docTypes).map(function (t) {
+        return '<option' + (t === (doc.docType || 'فحص كل البنود') ? ' selected' : '') + '>' + esc(t) + '</option>';
+      }).join('') + '</select>' +
+      '<div class="clause-grid" style="margin-top:14px">' + r.clauseReport.map(function (c) {
         return '<div class="clause ' + (c.present ? 'ok' : 'miss') + '"><span class="mk">' + (c.present ? '✓' : '✕') + '</span>' + esc(c.title) + '</div>';
       }).join('') + '</div>' +
       (isAdmin() ? '<div style="margin-top:14px"><button class="btn ghost sm" data-r="admin">تعديل القائمة</button></div>' : '') +
@@ -545,6 +562,12 @@
         }).join('') + '</div>';
     }
     $('tabBody').innerHTML = html; wire($('tabBody'));
+    $('dType').addEventListener('change', function () {
+      ST.update(doc.id, { docType: this.value });
+      AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+               title: 'تغيير نوع المستند', detail: doc.name + ' ← ' + this.value });
+      refreshAll(); renderDoc();
+    });
   }
 
   function gapCard(doc, g) {
@@ -857,6 +880,10 @@
       '<div class="card">' +
       '<label class="field-label" for="docName">اسم المستند</label>' +
       '<input type="text" id="docName" placeholder="مثال: عقد صيانة ٢٠٢٦">' +
+      '<label class="field-label" for="docType">نوع المستند — يحدد قائمة البنود التي تُفحص</label>' +
+      '<select id="docType">' + Object.keys(S.cfg.docTypes).map(function (t) {
+        return '<option' + (t === S.draft.type ? ' selected' : '') + '>' + esc(t) + '</option>';
+      }).join('') + '</select>' +
       '<div class="doclabel" style="margin-top:18px">المستند — مطلوب</div>' +
       '<button type="button" class="drop" id="drop_doc1"><div class="ic">' + ico('doc', 22) + '</div>' +
       '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
@@ -887,6 +914,7 @@
     });
     $('docName').value = S.draft.name || '';
     $('docName').addEventListener('input', function () { S.draft.name = this.value; });
+    $('docType').addEventListener('change', function () { S.draft.type = this.value; });
     $('analyzeBtn').addEventListener('click', runAnalysis);
   }
   function showFile(key, name, len) {
@@ -932,6 +960,7 @@
     if (!t1) { showError('أضف المستند أولًا — ارفع ملفًا أو الصق النص.'); return; }
     var name = ($('docName').value || '').trim() ||
                (S.files.doc1 ? S.files.doc1.name.replace(/\.[^.]+$/, '') : 'مستند ' + ST.today());
+    var docType = $('docType').value;
 
     $('procLogo').innerHTML = logo(34, 1.1);
     $('proc').classList.add('active');
@@ -942,13 +971,13 @@
 
     setTimeout(function () {
       var res;
-      try { res = E.analyze({ docText: t1, refText: t2, config: S.cfg }); }
+      try { res = E.analyze({ docText: t1, refText: t2, config: S.cfg, docType: docType }); }
       catch (e) {
         $('proc').classList.remove('active'); go('upload');
         showError('تعذّر تحليل هذا المستند: ' + e.message); return;
       }
       var code = AU.nextCode('NR');
-      var saved = ST.add({ name: name, text: t1, refText: t2,
+      var saved = ST.add({ name: name, text: t1, refText: t2, docType: docType,
                            refName: S.files.doc2 ? S.files.doc2.name : '', caseCode: code, fp: res.fingerprint });
       AU.log({ kind: 'analysis', actor: S.session.name, code: code, title: 'تحليل مستند: ' + name,
         detail: res.counts.chars.toLocaleString('en-US') + ' حرف · ' + res.obligations.length + ' التزام · ' +
@@ -965,7 +994,7 @@
         if (i >= STEPS.length) {
           setTimeout(function () {
             $('proc').classList.remove('active');
-            S.draft = { doc1: '', doc2: '', ctx: '', name: '' }; S.files = {};
+            S.draft = { doc1: '', doc2: '', ctx: '', name: '', type: docType }; S.files = {};
             refreshAll();
             if (!saved.saved) {
               S.banner = { bad: true, msg: saved.full
@@ -1074,6 +1103,10 @@
     c.clauses.forEach(function (cl, i) {
       html += '<div class="subcard"><div class="adm-row" style="border:none;padding:0 0 8px">' +
         '<input type="text" value="' + esc(cl.title) + '" data-clause="' + i + '" data-f="title">' +
+        '<select data-clause="' + i + '" data-f="group" style="width:118px">' +
+        ['عام', 'عقود', 'أمن معلومات', 'رسوم وخدمات'].map(function (g) {
+          return '<option' + (g === (cl.group || 'عام') ? ' selected' : '') + '>' + g + '</option>';
+        }).join('') + '</select>' +
         '<input type="number" step="0.05" min="0" max="1" value="' + cl.impact + '" data-clause="' + i + '" data-f="impact">' +
         '<button class="x" type="button" data-delclause="' + i + '">✕</button></div>' +
         chips(cl.terms, 'delcterm' + i) + addRow('addClause' + i, 'صيغة تدل على وجود البند') + '</div>';
@@ -1142,7 +1175,7 @@
       if (id === 'addDeontic') c.deontic.push(v);
       else if (id === 'addParty') c.parties.push(v);
       else if (id === 'newVague') c.vague.push({ term: v, why: 'عبارة غير قابلة للقياس' });
-      else if (id === 'newClause') c.clauses.push({ id: 'c' + Date.now().toString(36), title: v, impact: 0.6, terms: [v] });
+      else if (id === 'newClause') c.clauses.push({ id: 'c' + Date.now().toString(36), title: v, group: 'عام', impact: 0.6, terms: [v] });
       else if (id.indexOf('addTier') === 0) c.penaltyTiers[+id.slice(7)].terms.push(v);
       else if (id.indexOf('addClause') === 0) c.clauses[+id.slice(9)].terms.push(v);
       redraw();

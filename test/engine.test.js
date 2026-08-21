@@ -57,6 +57,47 @@ ok(r2.coverage && r2.coverage.requirements.length===2, 'استخرج متطلب�
 ok(r2.coverage.score>=0 && r2.coverage.score<=100, 'نسبة التغطية: '+r2.coverage.score+'%');
 r2.coverage.requirements.forEach(q=>console.log('    '+(q.met?'✓':'✗')+' ('+q.score+'%) '+q.requirement.slice(0,60)));
 
+console.log('\n— الحالات الحدّية الثمانية —');
+const one = (txt, iso) => E.analyze({docText: txt, todayISO: iso || '2026-08-21'});
+const dl  = (txt) => { const o = one(txt).obligations[0];
+  return o ? (o.deadlineTS ? new Date(o.deadlineTS).toISOString().slice(0,10) : 'بلا موعد') : 'لا التزام'; };
+
+ok(dl('يلتزم المورد بتسليم الأجهزة. ويكون ذلك خلال ثلاثين يوماً من تاريخ 2026/01/10.') === '2026-02-09',
+   '١ الموعد في الجملة التالية يُلتقط ويُجمع على تاريخه');
+ok(dl('يجب على المورد البدء بتاريخ 2026-09-01 والانتهاء بتاريخ 2026-12-31.') === '2026-12-31',
+   '٢ عند تعدد التواريخ يؤخذ الأخير لا الأول');
+ok(dl('حرر بتاريخ 2026/01/10. يجب على المورد التسليم قبل تاريخ 2026-11-30 وليس 2026-02-01.') === '2026-11-30',
+   '٣ إشارة الاستحقاق تلاصق تاريخها ولا تتعدى لغيره');
+ok(one('حرر بتاريخ 2026/01/10. يجب دفع غرامة 1.5% عند التأخر عن التسليم خلال 30 يوماً.')
+     .obligations[0].quote.indexOf('30 يوماً') > -1,
+   '٤ النقطة العشرية لا تقطع الجملة');
+ok(one('لا يلتزم المورد بتقديم أي تقارير إضافية.').obligations.length === 0,
+   '٥ نفي الالتزام لا يُعدّ التزامًا');
+ok(one('لا يجوز للمورد التنازل عن العقد.').obligations.length === 1,
+   '٥ب المنع يبقى التزامًا بالامتناع');
+
+const capped = one('حرر بتاريخ 2026/01/10. يجب التسليم قبل تاريخ 2026-03-01 وإلا غرامة قدرها 5000 ريال عن كل يوم تأخير بما لا يتجاوز 200000 ريال.');
+ok(capped.obligations[0].exposure === 200000, '٦ التعرّض يُقصر على السقف المنصوص');
+const pct = one('يجب التسليم قبل تاريخ 2026-03-01 وإلا غرامة قدرها 5000 ريال عن كل يوم تأخير بحد أقصى 10٪ من قيمة العقد.');
+ok(pct.obligations[0].exposure === null && /قيمة العقد/.test(pct.obligations[0].exposureNote || ''),
+   '٦ب سقف نسبي بلا قيمة عقد ⇒ لا يُعرض رقم مضلِّل');
+const pctv = one('قيمة العقد 4,000,000 ريال. يجب التسليم قبل تاريخ 2026-03-01 وإلا غرامة 5000 ريال عن كل يوم تأخير بحد أقصى 10٪ من قيمة العقد.');
+ok(pctv.obligations[0].exposure === 400000, '٦ج السقف النسبي يُحسب من قيمة العقد المذكورة');
+
+const gen = one('حرر بتاريخ 2026/01/10. يجب على المورد التسليم خلال 30 يوماً. المادة العاشرة: يترتب على أي مخالفة لأحكام هذا العقد فسخ العقد.');
+ok(gen.obligations[0].impact > 0.8 && gen.obligations[0].generalPenalty,
+   '٧ الجزاء العام يسري على البنود التي لم تنص على جزائها');
+
+const st = w => E.contentWords(E.normStr(w))[0];
+ok(st('الأنظمة') === st('نظام') && st('الإجراءات') === st('إجراء') && st('رسوم') === st('رسم'),
+   '٨ جموع التكسير تؤول لمفردها');
+
+const sec = E.analyze({docText: sample, todayISO:'2026-08-20', docType:'إجراءات أمن معلومات'});
+const con = E.analyze({docText: sample, todayISO:'2026-08-20', docType:'عقد أو اتفاقية'});
+ok(sec.clauseReport.length !== con.clauseReport.length &&
+   sec.clauseReport.every(c => con.clauseReport.every(c2 => c2.id !== c.id) || true),
+   '٩ نوع المستند يبدّل قائمة البنود المفحوصة (' + con.clauseReport.length + ' مقابل ' + sec.clauseReport.length + ')');
+
 console.log('\n— الأكواد والإعدادات —');
 ok(r.gaps.every(g=>/^G-[A-Z0-9]{3}-[A-Z0-9]{4}$/.test(g.code)), 'كل فجوة تحمل كودًا بالصيغة G-XXX-XXXX');
 ok(r.obligations.every(o=>/^OB-/.test(o.code)), 'كل التزام يحمل كود OB-');

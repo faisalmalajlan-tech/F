@@ -200,10 +200,20 @@
 
   /* ═══════════ ٥. تقطيع الجُمل ═══════════ */
 
+  /* النقطة تُنهي جملة فقط إن تلاها فراغ أو نهاية النص.
+     بدون هذا الشرط تنقطع «غرامة 1.5%» عند «1.» و«ر.س» عند «ر.»،
+     فيضيع باقي البند ويخرج اقتباس مشوَّه. */
+  function isBreak(norm, i) {
+    var c = norm[i];
+    if ('؟!؛'.indexOf(c) > -1) return true;
+    if (c !== '.') return false;
+    var nxt = norm[i + 1];
+    return nxt === undefined || nxt === ' ';
+  }
   function splitSentences(norm) {
     var out = [], start = 0, i;
     for (i = 0; i < norm.length; i++) {
-      if ('.؟!؛\n'.indexOf(norm[i]) > -1) {
+      if (isBreak(norm, i)) {
         var t = norm.slice(start, i + 1).trim();
         if (t.length > 12) out.push({ start: start, end: i + 1, text: t });
         start = i + 1;
@@ -231,7 +241,8 @@
 
   var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
   /* «عن كل يوم تأخير» تعني غرامة تتراكم — مبلغها الفعلي = القيمة × أيام التأخر */
-  var PER_DAY = null;
+  var PER_DAY = null, CAP_CUES = null, VALUE_CUES = null;
+  var PCT = /(\d[\d\.]*)\s*(?:٪|%|في المائه|في المئه)/;
 
   /* يترجم إعدادات المستخدم (نص عربي خام) إلى صيغ مطبَّعة، مرة واحدة لكل إعداد.
      الذاكرة المؤقتة مفتاحها بصمة الإعداد، فتعديل الإدارة يُعاد ترجمته فورًا. */
@@ -239,10 +250,12 @@
   function compile(cfg) {
     var key = JSON.stringify(cfg);
     if (_cc.key === key) return _cc.val;
-    STRUCTURAL = null;                       // قائمة الكلمات الهيكلية تتبع الإعداد
+    STRUCTURAL = null; STEM_MAP = null;      // القوائم المشتقة تتبع الإعداد
     var c = {
       raw: cfg,
       deontic: normList(cfg.deontic || []),
+      deonticNeg: normList(cfg.deonticNegations || []),
+      prohibitive: normList((cfg.conflict && cfg.conflict.prohibitions) || []),
       parties: normList(cfg.parties || []),
       penaltyTiers: (cfg.penaltyTiers || []).map(function (t) {
         return { label: t.label, impact: +t.impact, terms: normList(t.terms || []) };
@@ -250,13 +263,31 @@
       noPenaltyImpact: +cfg.noPenaltyImpact,
       noPenaltyLabel: cfg.noPenaltyLabel,
       clauses: (cfg.clauses || []).map(function (c2) {
-        return { id: c2.id, title: c2.title, impact: +c2.impact, terms: normList(c2.terms || []) };
+        return { id: c2.id, title: c2.title, group: c2.group || 'عام',
+                 impact: +c2.impact, terms: normList(c2.terms || []) };
       }),
       vague: (cfg.vague || []).map(function (v) { return { term: normStr(v.term), raw: v.term, why: v.why }; }),
       sc: cfg.scoring
     };
     _cc = { key: key, val: c };
     return c;
+  }
+
+  /* سقف الغرامة: «بما لا يتجاوز 500000 ريال» أو «بحد أقصى 10٪ من قيمة العقد».
+     بدون قراءته يخرج تعرّضٌ ماليٌّ مبالغ فيه أضعافًا حين تكون الغرامة يومية. */
+  function findCap(normSentence) {
+    if (!CAP_CUES) CAP_CUES = normList(['بما لا يتجاوز', 'بحد أقصى', 'بحد اقصى', 'على ألا تتجاوز',
+      'على الا تتجاوز', 'وبحد أعلى', 'بحد أعلى', 'وبما لا يزيد', 'بما لا يزيد عن', 'ولا تتجاوز']);
+    for (var i = 0; i < CAP_CUES.length; i++) {
+      var k = normSentence.indexOf(CAP_CUES[i]);
+      if (k === -1) continue;
+      var tail = normSentence.slice(k, k + 90);
+      var m = tail.match(MONEY);
+      if (m) return { amount: parseFloat(m[1].replace(/,/g, '')), kind: 'مبلغ' };
+      var p = tail.match(PCT);
+      if (p) return { percent: parseFloat(p[1]), kind: 'نسبة' };
+    }
+    return null;
   }
 
   function classifyPenalty(normSentence, C) {
@@ -269,12 +300,15 @@
       var hit = hasAny(normSentence, C.penaltyTiers[i].terms);
       if (hit) {
         var t = C.penaltyTiers[i];
+        var cap = findCap(normSentence);
         return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
-                 label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') + ')' : t.label,
-                 amount: amount, currency: money ? money[2] : null, perDay: perDay };
+                 label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') +
+                        (cap ? ' · سقف ' + (cap.kind === 'مبلغ' ? cap.amount.toLocaleString('en-US') : cap.percent + '٪') : '') + ')'
+                        : t.label,
+                 amount: amount, currency: money ? money[2] : null, perDay: perDay, cap: cap };
       }
     }
-    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false };
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false, cap: null };
   }
 
   /* ═══════════ أكواد التتبّع ═══════════ */
@@ -372,7 +406,16 @@
   }
   /* تجذير خفيف: العربية تصرّف الكلمة الواحدة بصيغ كثيرة («مستقل/مستقلة/المستقلة»)
      فبدونه تُعدّ صيغتان لنفس الكلمة غير متطابقتين وتنهار المطابقة. */
+  var STEM_MAP = null;
   function stem(w) {
+    if (!STEM_MAP) {
+      STEM_MAP = {};
+      var raw = (CC && CC.raw && CC.raw.stemMap) || NC.DEFAULTS.stemMap || {};
+      Object.keys(raw).forEach(function (k) { STEM_MAP[normStr(k)] = normStr(raw[k]); });
+    }
+    var bare = w.replace(/^(وال|بال|كال|فال|ال|و|ب|ل|ف|ك)/, '');
+    if (STEM_MAP[w]) w = STEM_MAP[w];
+    else if (STEM_MAP[bare]) w = STEM_MAP[bare];
     w = w.replace(/^(وال|بال|كال|فال|ال|و|ب|ل|ف|ك)/, '');
     w = w.replace(/(اتها|اتهم|يتها|ياتهم|هما|كما|هم|هن|نا|كم|ها|ه|ي)$/, '');
     w = w.replace(/(اتين|ييه|يات|ات|ين|ون|يه|ية|ه|ا)$/, '');
@@ -407,6 +450,18 @@
     };
     var quoteAt = function (a, b) { var r = toOrig(a, b); return text.slice(r.start, r.end).trim(); };
 
+    /* قيمة العقد — لتحويل السقف النسبي إلى مبلغ. إن لم تُذكر، يبقى
+       التعرّض «غير محسوب» بدل أن نعرض رقمًا نعرف أنه فوق السقف. */
+    if (!VALUE_CUES) VALUE_CUES = normList(['قيمة العقد', 'إجمالي قيمة العقد', 'قيمة هذا العقد',
+      'القيمة الإجمالية', 'قيمة الاتفاقية', 'مبلغ العقد']);
+    var contractValue = null;
+    for (var vi = 0; vi < VALUE_CUES.length; vi++) {
+      var vk = norm.indexOf(VALUE_CUES[vi]);
+      if (vk === -1) continue;
+      var vm = norm.slice(vk, vk + 90).match(MONEY);
+      if (vm) { contractValue = parseFloat(vm[1].replace(/,/g, '')); break; }
+    }
+
     var sentences = splitSentences(norm);
     var dates = findDates(norm);
     var durations = findDurations(norm);
@@ -418,31 +473,98 @@
       if (dates[ai].at < headEnd) { anchor = dates[ai]; break; }
     }
 
+    /* إشارات الاستحقاق: التاريخ الذي تسبقه إحداها هو الموعد المقصود،
+       لا أول تاريخ في الجملة. «يبدأ 2026-09-01 وينتهي 2026-12-31» موعده
+       الثاني لا الأول — فإن لم توجد إشارة نأخذ آخر تاريخ. */
+    var DUE_CUES = normList(['قبل تاريخ', 'بحلول', 'في موعد أقصاه', 'موعد أقصاه', 'حتى تاريخ',
+      'في موعد لا يتجاوز', 'لا يتجاوز تاريخ', 'قبل حلول', 'في تاريخ أقصاه', 'وينتهي', 'الانتهاء']);
+    /* الإشارة يجب أن تلاصق التاريخ. بنافذة واسعة تلتقطُ إشارةَ تاريخٍ
+       سابق: «قبل تاريخ 2026-11-30 وليس 2026-02-01» كانت تُعدّ الإشارة
+       سابقةً للتاريخ الثاني أيضًا. */
+    var BASE_CUES = normList(['من تاريخ', 'اعتباراً من', 'اعتبارا من', 'ابتداءً من', 'بدءاً من', 'من']);
+    function nearCue(at, cues, span, tail) {
+      var win = norm.slice(Math.max(0, at - span), at);
+      var hit = hasAny(win, cues);
+      if (!hit) return false;
+      return win.lastIndexOf(hit) + hit.length >= win.length - tail;
+    }
+    var cueBefore = function (at) { return nearCue(at, DUE_CUES, 18, 9); };
+
+    function pickDeadline(a, b) {
+      var inRange = dates.filter(function (x) { return x.at >= a && x.at < b; });
+      var dur = durations.filter(function (x) { return x.at >= a && x.at < b; })[0];
+
+      /* «خلال ثلاثين يوماً من تاريخ 2026/01/10» موعده التاريخ + المدة،
+         لا التاريخ نفسه — فالتاريخ هنا أساسٌ لا استحقاق. */
+      if (dur && inRange.length) {
+        var base = inRange.filter(function (x) {
+          return x.at > dur.at && nearCue(x.at, BASE_CUES, 16, 8);
+        })[0];
+        if (base) {
+          return { ts: base.ts + dur.days * DAY, approx: base.approx,
+                   raw: dur.raw + ' (من ' + base.raw + ')' };
+        }
+      }
+      if (inRange.length) {
+        var cued = inRange.filter(function (x) { return cueBefore(x.at); });
+        var pick = cued.length ? cued[cued.length - 1] : inRange[inRange.length - 1];
+        return { ts: pick.ts, raw: pick.raw, approx: pick.approx };
+      }
+      if (!dur) return null;
+      return { ts: anchor ? anchor.ts + dur.days * DAY : null,
+               raw: dur.raw + (anchor ? ' (من ' + anchor.raw + ')' : ' (بلا تاريخ مرجعي)'),
+               approx: anchor ? anchor.approx : false };
+    }
+    var nextIdx = {};
+    sentences.forEach(function (s2, i2) { if (i2 + 1 < sentences.length) nextIdx[s2.start] = i2 + 1; });
+
+    /* جزاءٌ عام يسري على المستند كله: «يترتب على مخالفة أحكام هذه اللائحة...».
+       بدونه يخرج كل بندٍ لم يذكر جزاءه بأثر 0.35 مع أن الفسخ يشمله. */
+    var GENERAL_SCOPE = normList(['مخالفة أحكام هذه', 'مخالفة هذه', 'أي مخالفة', 'مخالفة أحكام',
+      'مخالفة هذا العقد', 'مخالفة هذه السياسة', 'مخالفة هذه اللائحة', 'الإخلال بأحكام', 'الإخلال بهذه']);
+    var docPenalty = null;
+    sentences.forEach(function (s2) {
+      if (!hasAny(s2.text, GENERAL_SCOPE)) return;
+      var p = classifyPenalty(s2.text, C);
+      if (p.impact <= C.noPenaltyImpact) return;
+      if (!docPenalty || p.impact > docPenalty.impact) {
+        docPenalty = { impact: p.impact, label: p.label, quote: quoteAt(s2.start, s2.end) };
+      }
+    });
+
     /* ── الالتزامات ── */
     var obligations = [];
     sentences.forEach(function (s) {
       var marker = hasAny(s.text, C.deontic);
       if (!marker) return;
+      /* «لا يلتزم المورد بتقديم تقارير» إعفاء لا التزام. أما «لا يجوز»
+         و«يحظر» فهي التزام بالامتناع، ولذلك تُستثنى من إلغاء النفي. */
+      if (hasAny(s.text, C.deonticNeg) && !hasAny(s.text, C.prohibitive)) return;
 
-      // أقرب تاريخ أو مدة داخل الجملة نفسها
-      var d = null, source = null, approx = false;
-      for (var i = 0; i < dates.length; i++) {
-        if (dates[i].at >= s.start && dates[i].at < s.end) {
-          d = dates[i].ts; source = dates[i].raw; approx = dates[i].approx; break;
+      var picked = pickDeadline(s.start, s.end);
+      // ٥) الموعد قد يرد في الجملة التالية: «يلتزم المورد بالتسليم. ويكون
+      //    ذلك خلال ثلاثين يوماً». نأخذها فقط إن لم تكن التزامًا مستقلًا.
+      var fromNext = false;
+      if (!picked && nextIdx[s.start] !== undefined) {
+        var nx = sentences[nextIdx[s.start]];
+        if (nx && !hasAny(nx.text, C.deontic)) {
+          picked = pickDeadline(nx.start, nx.end);
+          fromNext = !!picked;
         }
       }
-      if (d === null) {
-        for (var j = 0; j < durations.length; j++) {
-          if (durations[j].at >= s.start && durations[j].at < s.end) {
-            if (anchor) { d = anchor.ts + durations[j].days * DAY; approx = anchor.approx; }
-            source = durations[j].raw + (anchor ? ' (من ' + anchor.raw + ')' : ' (بلا تاريخ مرجعي)');
-            break;
-          }
-        }
-      }
+      var d = picked ? picked.ts : null;
+      var source = picked ? picked.raw + (fromNext ? ' (من الجملة التالية)' : '') : null;
+      var approx = picked ? picked.approx : false;
 
       var days = d === null ? null : Math.round((d - today) / DAY);
       var pen = classifyPenalty(s.text, C);
+      /* الجزاء العام أضعف دلالةً من المنصوص في البند نفسه، فيُخصم منه قليلًا */
+      var generalPenalty = false;
+      if (pen.impact <= C.noPenaltyImpact && docPenalty) {
+        pen = { impact: Math.max(C.noPenaltyImpact, docPenalty.impact * 0.85),
+                label: 'جزاء عام: ' + docPenalty.label, amount: null, currency: null, perDay: false, cap: null };
+        generalPenalty = true;
+      }
       var party = hasAny(s.text, C.parties);
       var q = quoteAt(s.start, s.end);
       obligations.push({
@@ -451,6 +573,7 @@
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
         penaltyAmount: pen.amount, penaltyCurrency: pen.currency, penaltyPerDay: pen.perDay,
+        penaltyCap: pen.cap, generalPenalty: generalPenalty,
         probability: probFromDays(days, sc),
         risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
@@ -461,11 +584,28 @@
       o.severity = sevFromRisk(o.risk, sc);
       /* التعرض المالي: المتجاوز غرامته جارية (× أيام التأخر إن كانت يومية)،
          والقادم غرامته محتملة عند التخلف. */
-      o.exposure = null;
+      o.exposure = null; o.exposureNote = null;
       if (o.penaltyAmount !== null && o.penaltyAmount !== undefined && o.daysRemaining !== null) {
-        o.exposure = o.penaltyPerDay && o.daysRemaining < 0
+        var raw = o.penaltyPerDay && o.daysRemaining < 0
           ? o.penaltyAmount * Math.min(-o.daysRemaining, 3650)
           : o.penaltyAmount;
+        var cap = o.penaltyCap;
+        if (cap && cap.kind === 'مبلغ') {
+          o.exposure = Math.min(raw, cap.amount);
+          if (raw > cap.amount) o.exposureNote = 'بلغ السقف المنصوص (' + cap.amount.toLocaleString('en-US') + ')';
+        } else if (cap && cap.kind === 'نسبة') {
+          if (contractValue) {
+            var capAmt = contractValue * cap.percent / 100;
+            o.exposure = Math.min(raw, capAmt);
+            o.exposureNote = 'سقف ' + cap.percent + '٪ من قيمة العقد = ' + Math.round(capAmt).toLocaleString('en-US');
+          } else {
+            // سقف نسبي وقيمة العقد غير مذكورة: أي رقم نعرضه قد يتجاوز السقف
+            o.exposure = null;
+            o.exposureNote = 'محدود بـ' + cap.percent + '٪ من قيمة العقد — القيمة غير مذكورة في المستند';
+          }
+        } else {
+          o.exposure = raw;
+        }
         o.exposureAccruing = o.daysRemaining < 0;
       }
       o.key = normStr(o.quote).slice(0, 70);
@@ -518,7 +658,13 @@
     });
 
     // (د) بنود معيارية غائبة
-    var clauseReport = C.clauses.map(function (c) {
+    /* نوع المستند يحدد أي مجموعات بنود تُفحص. «فحص كل البنود» أو نوع
+       غير معروف يعني فحص الكل كما كان. */
+    var groups = C.raw.docTypes ? C.raw.docTypes[opts.docType] : null;
+    var activeClauses = groups
+      ? C.clauses.filter(function (c) { return groups.indexOf(c.group || 'عام') > -1; })
+      : C.clauses;
+    var clauseReport = activeClauses.map(function (c) {
       var hit = hasAny(norm, c.terms);
       return { id: c.id, title: c.title, present: !!hit, hit: hit, impact: c.impact };
     });
@@ -652,6 +798,7 @@
         return x - y;
       }),
       clauseReport: clauseReport, coverage: coverage,
+      docPenalty: docPenalty, contractValue: contractValue, docType: opts.docType || null,
       anchorDate: anchor ? { raw: anchor.raw, iso: new Date(anchor.ts).toISOString().slice(0, 10), approx: anchor.approx } : null,
       counts: { sentences: sentences.length, dates: dates.length, durations: durations.length, chars: text.length },
       fingerprint: fp,

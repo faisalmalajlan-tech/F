@@ -44,7 +44,7 @@
       addedAt: Date.now(),
       text: (doc.text || '').slice(0, MAX_TEXT),
       refText: (doc.refText || '').slice(0, MAX_TEXT),
-      refName: doc.refName || '',
+      refName: doc.refName || '', docType: doc.docType || 'فحص كل البنود',
       context: doc.context || '',
       caseCode: doc.caseCode || '', fp: doc.fp || '',
       truncated: (doc.text || '').length > MAX_TEXT,
