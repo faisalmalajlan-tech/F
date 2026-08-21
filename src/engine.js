@@ -230,6 +230,8 @@
   /* ═══════════ ٦. الالتزامات والجزاءات ═══════════ */
 
   var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
+  /* «عن كل يوم تأخير» تعني غرامة تتراكم — مبلغها الفعلي = القيمة × أيام التأخر */
+  var PER_DAY = null;
 
   /* يترجم إعدادات المستخدم (نص عربي خام) إلى صيغ مطبَّعة، مرة واحدة لكل إعداد.
      الذاكرة المؤقتة مفتاحها بصمة الإعداد، فتعديل الإدارة يُعاد ترجمته فورًا. */
@@ -237,6 +239,7 @@
   function compile(cfg) {
     var key = JSON.stringify(cfg);
     if (_cc.key === key) return _cc.val;
+    STRUCTURAL = null;                       // قائمة الكلمات الهيكلية تتبع الإعداد
     var c = {
       raw: cfg,
       deontic: normList(cfg.deontic || []),
@@ -257,15 +260,21 @@
   }
 
   function classifyPenalty(normSentence, C) {
+    if (!PER_DAY) PER_DAY = normList(['عن كل يوم', 'لكل يوم', 'يومياً', 'يوميا', 'عن كل يوم تأخير', 'غرامة يومية']);
+    var money = normSentence.match(MONEY);
+    var amount = money ? parseFloat(money[1].replace(/,/g, '')) : null;
+    if (amount !== null && !isFinite(amount)) amount = null;
+    var perDay = !!(amount !== null && hasAny(normSentence, PER_DAY));
     for (var i = 0; i < C.penaltyTiers.length; i++) {
       var hit = hasAny(normSentence, C.penaltyTiers[i].terms);
       if (hit) {
-        var t = C.penaltyTiers[i], money = normSentence.match(MONEY);
+        var t = C.penaltyTiers[i];
         return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
-                 label: money ? t.label + ' (' + money[0].trim() + ')' : t.label };
+                 label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') + ')' : t.label,
+                 amount: amount, currency: money ? money[2] : null, perDay: perDay };
       }
     }
-    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel };
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false };
   }
 
   /* ═══════════ أكواد التتبّع ═══════════ */
@@ -352,6 +361,9 @@
   var STRUCTURAL = null, CC = null;
   function structuralWords() {
     if (STRUCTURAL) return STRUCTURAL;
+    // contentWords قد تُستدعى من خارج analyze (كاشف التعارض مثلًا)،
+    // فنسقط على الإعدادات الافتراضية بدل الانهيار.
+    if (!CC) CC = compile(NC.DEFAULTS);
     STRUCTURAL = {};
     STOP.concat(CC.deontic, CC.parties).forEach(function (t) {
       t.split(' ').forEach(function (w) { if (w.length > 1) STRUCTURAL[w] = 1; });
@@ -438,6 +450,7 @@
         rawDeadline: source, deadlineTS: d, approxDate: approx,
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
+        penaltyAmount: pen.amount, penaltyCurrency: pen.currency, penaltyPerDay: pen.perDay,
         probability: probFromDays(days, sc),
         risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
@@ -446,6 +459,15 @@
     });
     obligations.forEach(function (o, i) {
       o.severity = sevFromRisk(o.risk, sc);
+      /* التعرض المالي: المتجاوز غرامته جارية (× أيام التأخر إن كانت يومية)،
+         والقادم غرامته محتملة عند التخلف. */
+      o.exposure = null;
+      if (o.penaltyAmount !== null && o.penaltyAmount !== undefined && o.daysRemaining !== null) {
+        o.exposure = o.penaltyPerDay && o.daysRemaining < 0
+          ? o.penaltyAmount * Math.min(-o.daysRemaining, 3650)
+          : o.penaltyAmount;
+        o.exposureAccruing = o.daysRemaining < 0;
+      }
       o.key = normStr(o.quote).slice(0, 70);
       o.index = i;
     });
@@ -665,6 +687,7 @@
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
-    makeCode: makeCode, shortHash: shortHash, compile: compile
+    makeCode: makeCode, shortHash: shortHash, compile: compile,
+    stem: stem, contentWords: contentWords, normList: normList, hasAny: hasAny
   };
 });

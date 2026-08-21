@@ -21,7 +21,14 @@ const P = f => fs.readFileSync(path.resolve(__dirname, '../samples/' + f), 'utf8
     await page.click(`.navpanel [data-r="${r}"]`); await page.waitForTimeout(420); };
 
   await add('إجراءات أمن المعلومات', P('02-إجراءات-داخلية-نموذج-تجريبي.txt'), P('01-سياسات-البنك-المركزي-نموذج-تجريبي.txt'));
-  await nav('docs'); await add('عقد تشغيل وصيانة', P('02-إجراءات-داخلية-نموذج-تجريبي.txt').replace('2026/01/15','2026/05/10'));
+  await nav('docs'); await add('سياسة الرسوم والعمولات',
+    P('04-سياسة-الرسوم-الداخلية-نموذج-تجريبي.txt'), P('03-تعليمات-الرسوم-نموذج-تجريبي.txt'));
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(450);
+  await page.fill('#fxOrg', 'بنك الواحة التجاري'); await page.fill('#fxNum', '2026/14');
+  await page.fill('#fxEff', '2026-09-01'); await page.fill('#fxOwner', 'قطاع الخدمات المصرفية');
+  await page.fill('#fxRef', 'تعليمات الرسوم والعمولات'); await page.fill('#fxDays', '30');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'dist/shot-fix.png' });
 
   // نزرع أسبوعًا من التاريخ ليظهر منحنى الخطر
   await page.evaluate(() => {
@@ -32,11 +39,13 @@ const P = f => fs.readFileSync(path.resolve(__dirname, '../samples/' + f), 'utf8
     localStorage.setItem(k, JSON.stringify(all));
   });
   await page.reload(); await page.waitForTimeout(1100);
+  await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(200);
   await page.screenshot({ path: 'dist/shot-home.png' });
   await nav('docs');  await page.screenshot({ path: 'dist/shot-docs.png' });
   await nav('plan');  await page.screenshot({ path: 'dist/shot-plan.png' });
   await nav('docs'); await page.click('.doc-main'); await page.waitForTimeout(450);
   await page.screenshot({ path: 'dist/shot-doc.png' });
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(450);
   await page.click('[data-tab="gaps"]'); await page.waitForTimeout(400);
   await page.screenshot({ path: 'dist/shot-gaps.png' });
   console.log('أخطاء JS:', errs.length ? errs.join(' | ') : 'صفر');

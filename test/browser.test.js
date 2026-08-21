@@ -3,6 +3,8 @@ const path = require('path'), fs = require('fs');
 const P = f => fs.readFileSync(path.resolve(__dirname, '../samples/' + f), 'utf8');
 const PROC = P('02-إجراءات-داخلية-نموذج-تجريبي.txt');
 const POL  = P('01-سياسات-البنك-المركزي-نموذج-تجريبي.txt');
+const FEEREF = P('03-تعليمات-الرسوم-نموذج-تجريبي.txt');
+const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجريبي.txt');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
@@ -95,6 +97,7 @@ const POL  = P('01-سياسات-البنك-المركزي-نموذج-تجريب�
   console.log('\n— صفحة المستند —');
   await nav('docs'); await page.click('.doc-main'); await page.waitForTimeout(400);
   for (const [tab, sel, label] of [['gaps', '.gap-card', 'الفجوات'], ['dl', '.pred-card', 'المواعيد'],
+                                   ['fix', '.empty, .fixcard', 'التعديلات'],
                                    ['rep', '.report-head', 'التقرير'], ['sum', '.clause-grid', 'نظرة عامة']]) {
     await page.click(`[data-tab="${tab}"]`); await page.waitForTimeout(350);
     ok(await page.locator(sel).first().isVisible(), 'تبويب ' + label + ' يعمل');
@@ -116,13 +119,56 @@ const POL  = P('01-سياسات-البنك-المركزي-نموذج-تجريب�
     await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   }
 
-  console.log('\n— مستند ثانٍ والمحفظة —');
+  console.log('\n— إصدار سياسة معدّلة وتعميم —');
+  await nav('docs'); await addDoc('سياسة الرسوم والعمولات', FEEPOL, FEEREF);
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(450);
+  const fixes = await page.locator('.fixcard').count();
+  ok(fixes === 3, 'رُصدت ٣ بنود تخالف المرجع: ' + fixes);
+  const fixTxt = await page.locator('#tabBody').textContent();
+  ok(fixTxt.indexOf('50 ريال') > -1, 'مبلغ الرسوم المخالف ظاهر (50 ريال)');
+  ok(fixTxt.indexOf('لا تُفرض أي رسوم') > -1, 'مسودة البند البديل مولَّدة');
+  ok((await page.locator('.warnbox').isVisible()), 'تحذير «مسودة تحتاج اعتمادًا» ظاهر');
+  // البند المتوافق أصلًا لا يُعلَّم
+  ok(fixTxt.indexOf('التحويلات الداخلية') === -1, 'البند المتوافق أصلًا لم يُعلَّم كمخالف');
+
+  await page.fill('#fxOrg', 'بنك الواحة'); await page.waitForTimeout(200);
+  await page.fill('#fxEff', '2026-09-01'); await page.waitForTimeout(300);
+  const dlPromise = page.waitForEvent('download');
+  await page.click('#fxCirc');
+  const dl = await dlPromise;
+  const circ = fs.readFileSync(await dl.path(), 'utf8');
+  ok(/مسودة/.test(circ), 'التعميم يبدأ بوسم «مسودة»');
+  ok(circ.indexOf('بنك الواحة') > -1, 'اسم الجهة في التعميم');
+  ok(circ.indexOf('2026-09-01') > -1, 'تاريخ النفاذ في التعميم');
+  ok(circ.indexOf('يُوقف فورًا تحصيل') > -1, 'التعميم يتضمن أمر إيقاف التحصيل');
+  ok(circ.indexOf('المراجعة القانونية') > -1, 'خانة الاعتماد القانوني موجودة');
+
+  const dl2Promise = page.waitForEvent('download');
+  await page.click('#fxPol');
+  const pol2 = fs.readFileSync(await (await dl2Promise).path(), 'utf8');
+  // البند الجديد يذكر المبلغ الملغى عمدًا، فالمحكّ هو اختفاء نص الفرض الأصلي
+  ok(pol2.indexOf('تُفرض رسوم إصدار بطاقة الصراف الآلي بمبلغ') === -1, 'نص فرض رسم البطاقة أُزيل من السياسة');
+  ok(pol2.indexOf('وتُلغى الرسوم البالغة 50 ريال') > -1, 'البند الجديد يشير للمبلغ الملغى صراحةً');
+  ok(pol2.indexOf('لا تُفرض أي رسوم أو عمولات') > -1, 'السياسة المعدّلة تحمل البند الجديد');
+  ok(pol2.indexOf('المادة الأولى') > -1, 'بقية بنود السياسة سليمة');
+
+  console.log('\n— الداشبورد التنفيذي —');
+  await nav('home');
+  const home = await page.locator('#pageContent').textContent();
+  ok((await page.locator('.exec-cell').count()) === 4, 'أربعة أرقام تنفيذية');
+  ok(home.indexOf('مشكلة انحلّت') > -1, 'يعرض كم انحلّ');
+  ok(home.indexOf('ريال تعرّض مالي') > -1, 'يعرض التعرّض المالي');
+  ok(home.indexOf('الغرامات — متى وكم') > -1, 'يعرض متى تأتي الغرامات وكم');
+  ok(home.indexOf('100,000') > -1, 'مبلغ الغرامة مستخرج من النص');
+  ok((await page.locator('.progress .pf').isVisible()), 'شريط الإنجاز ظاهر');
+  ok(home.indexOf('بند يخالف المرجع') > -1, 'التعارض بارز في الداشبورد');
+
+  console.log('\n— مستند ثالث والمحفظة —');
   await nav('docs'); await addDoc('عقد تشغيل', PROC.replace('2026/01/15', '2026/03/20'));
   await nav('home');
-  ok((await page.locator('#pageContent').textContent()).indexOf('٢ مستند') > -1 ||
-     (await page.locator('#pageContent').textContent()).indexOf('2 مستند') > -1, 'الرئيسية تجمع المستندين');
+  ok((await page.locator('#pageContent').textContent()).indexOf('3 مستند') > -1, 'الرئيسية تجمع المستندات الثلاثة');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 2, 'مستندان محفوظان');
+  ok((await page.locator('.doc-card').count()) === 3, 'ثلاثة مستندات محفوظة');
 
   console.log('\n— المدير —');
   await page.click('#burgerBtn'); await page.waitForTimeout(140);
@@ -131,7 +177,7 @@ const POL  = P('01-سياسات-البنك-المركزي-نموذج-تجريب�
   ok((await page.locator('#userRole').textContent()) === 'مدير النظام', 'دخول المدير');
   ok((await navCount()) === 6, 'المدير يرى ٦ صفحات');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 2, 'المستندات باقية بعد تبديل المستخدم');
+  ok((await page.locator('.doc-card').count()) === 3, 'المستندات باقية بعد تبديل المستخدم');
   await nav('admin');
   await page.fill('#addDeontic', 'تختص'); await page.click('[data-add="addDeontic"]'); await page.waitForTimeout(300);
   await page.click('#cfgSave'); await page.waitForTimeout(500);

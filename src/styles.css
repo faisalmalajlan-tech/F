@@ -391,3 +391,31 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 
 .subcard{border:1px solid var(--line);padding:14px;margin-bottom:10px}
 .grouplbl{font-size:10px;color:var(--gold);letter-spacing:.12em;margin:18px 0 8px}
+
+/* ── الداشبورد التنفيذي ── */
+.exec{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:14px}
+.exec-cell{background:var(--bg);padding:20px 15px;text-align:right}
+.exec-cell .v{font-size:30px;letter-spacing:-.02em}
+.exec-cell .l{font-size:10.5px;color:var(--text2);margin-top:7px;letter-spacing:.03em}
+.exec-cell .s{font-size:9.5px;color:var(--text3);margin-top:4px}
+.progress{height:5px;background:rgba(255,255,255,.05);overflow:hidden}
+.progress .pf{height:100%;background:var(--success)}
+.progress-lbl{display:flex;justify-content:space-between;margin-top:9px;font-size:10.5px;color:var(--text3);letter-spacing:.03em}
+.note{font-size:9.5px;color:var(--text3);line-height:1.85;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* ── صفحة التعديلات ── */
+.warnbox{border:1px solid rgba(242,153,74,.34);background:rgba(242,153,74,.06);color:#F7B274;
+  padding:13px 15px;border-radius:2px;font-size:11.5px;line-height:1.9;margin-bottom:16px;font-weight:300}
+.fixgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fixgrid .field-label{margin-top:0}
+.fixcard{border:1px solid var(--line);border-right:2px solid var(--danger);border-radius:3px;
+  padding:18px;margin-bottom:12px;background:var(--card)}
+.fixcard.off{opacity:.42;border-right-color:var(--text3)}
+.fixside{margin-top:14px}
+.fs-lbl{font-size:9px;letter-spacing:.12em;color:var(--text3);margin-bottom:6px}
+.fs-lbl.bad{color:var(--danger)}
+.fs-lbl.good{color:var(--success)}
+.fixprop{background:rgba(95,211,168,.05);border-color:rgba(95,211,168,.28);line-height:1.95}
+.tick{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--text3);white-space:nowrap;cursor:pointer}
+.tick input{accent-color:var(--gold);width:14px;height:14px}
+@media(max-width:520px){.fixgrid{grid-template-columns:1fr}}

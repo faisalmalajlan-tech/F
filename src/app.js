@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
-      AU = window.NadheerAudit, ST = window.NadheerStore;
+      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -127,6 +127,25 @@
   function analyzeDoc(doc) {
     var res = E.analyze({ docText: doc.text, refText: doc.refText, context: doc.context, config: S.cfg });
     res.docId = doc.id; res.docName = doc.name; res.caseCode = doc.caseCode;
+
+    /* التعارض المباشر أخطر من الفجوة: بندٌ في سياستك يفعل ما يمنعه المرجع.
+       يدخل قائمة الفجوات ليظهر في الخطر وخطة المعالجة، ويقود صفحة التعديلات. */
+    res.conflicts = doc.refText ? CF.detect({ docText: doc.text, refText: doc.refText, config: S.cfg }).conflicts : [];
+    var ci = S.cfg.conflict.impact;
+    res.conflicts.forEach(function (c) {
+      var risk = E.itemRisk(0.95, ci, null, S.cfg.scoring);
+      res.gaps.unshift({
+        code: c.code, key: 'تعارض|' + c.key, type: 'تعارض مع المرجع',
+        title: 'بند يخالف المرجع: ' + c.core,
+        description: 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') +
+                     '. تطابق الموضوع ' + c.score + '٪.',
+        recommendation: 'أصدر البند المعدَّل والتعميم من صفحة «التعديلات».',
+        evidence: c.docQuote, evidenceType: 'quote',
+        probability: 0.95, impact: ci, decay: 1, risk: risk,
+        severity: E.sevFromRisk(risk, S.cfg.scoring), conflict: c
+      });
+    });
+    res.gaps.sort(function (a, b) { return b.risk - a.risk; });
     // الفجوات المُنجزة تخرج من الحساب — إغلاق مهمة يخفض الخطر فعلًا
     var open = res.gaps.filter(function (g) { return ST.taskOf(doc, g.code).status !== 'done'; });
     res.openGaps = open;
@@ -174,6 +193,34 @@
     });
     return out;
   }
+  /* أرقام الداشبورد التنفيذي — تُجمَع من كل المستندات */
+  function exec() {
+    var openGaps = 0, doneGaps = 0, totalGaps = 0, conflicts = 0;
+    var accruing = [], upcoming = [];
+    S.docs.forEach(function (d) {
+      var r = S.analyses[d.id]; if (!r) return;
+      totalGaps += r.gaps.length; openGaps += r.openGaps.length; doneGaps += r.doneCount;
+      conflicts += (r.conflicts || []).length;
+      r.obligations.forEach(function (o) {
+        if (o.exposure === null || o.exposure === undefined) return;
+        (o.exposureAccruing ? accruing : upcoming).push({ doc: d, o: o });
+      });
+    });
+    accruing.sort(function (a, b) { return b.o.exposure - a.o.exposure; });
+    upcoming.sort(function (a, b) { return a.o.daysRemaining - b.o.daysRemaining; });
+    var sum = function (l) { return l.reduce(function (a, x) { return a + x.o.exposure; }, 0); };
+    return {
+      openGaps: openGaps, doneGaps: doneGaps, totalGaps: totalGaps, conflicts: conflicts,
+      pctDone: totalGaps ? Math.round(doneGaps / totalGaps * 100) : 0,
+      accruing: accruing, upcoming: upcoming,
+      accruingSum: sum(accruing), upcomingSum: sum(upcoming),
+      nextFine: upcoming.length ? upcoming[0] : null
+    };
+  }
+  var money = function (n) {
+    return Math.round(n).toLocaleString('en-US');
+  };
+
   function allTasks() {
     var out = [];
     S.docs.forEach(function (d) {
@@ -270,17 +317,12 @@
         '<div style="color:var(--gold);display:flex;justify-content:center;margin-bottom:18px">' + logo(38, 1) + '</div>' +
         '<div style="font-weight:300;font-size:21px;margin-bottom:10px">ابدأ بمستند</div>' +
         '<p style="color:var(--text2);font-size:12.5px;margin:0 auto 22px;line-height:2;font-weight:300;max-width:42ch">' +
-        'ارفع عقدًا أو لائحة أو إجراءات. نذير يحفظه، ويعيد حسابه كل يوم، ويخبرك بما سيستحق قبل أن يستحق.</p>' +
+        'ارفع عقدًا أو لائحة أو سياسة. نذير يحفظه، ويعيد حسابه كل يوم، ويخبرك بما سيستحق قبل أن يستحق.</p>' +
         '<div style="max-width:240px;margin:0 auto"><button class="btn" data-r="upload">تحليل مستند جديد</button></div></div>';
       wire(el); return;
     }
 
-    var pr = portfolioRisk();
-    var dl = allDeadlines(), over = allOverdue();
-    var soon = dl.filter(function (x) { return x.p.daysRemaining <= 30; });
-    var tasks = allTasks(), openTasks = tasks.filter(function (t) { return t.task.status !== 'done'; });
-
-    // ما تحرّك اليوم
+    var pr = portfolioRisk(), x = exec(), over = allOverdue();
     var moves = [];
     S.docs.forEach(function (d) {
       var dd = ST.delta(d);
@@ -289,40 +331,79 @@
     moves.sort(function (a, b) { return b.d.diff - a.d.diff; });
 
     var html = banner();
+
+    /* ١ — الحالة */
     html += '<div class="risk-hero"><div class="top">' +
-      '<div style="flex:1;min-width:190px">' +
-      '<div class="eyebrow">محفظة الامتثال · ' + S.docs.length + ' مستند</div>' +
-      '<div class="risk-title">خطرك اليوم<br><b>' + riskWord(pr) + '</b></div>' +
-      '<div class="risk-badges">' +
-        (over.length ? '<span class="badge high">' + over.length + ' موعد متجاوز</span>' : '') +
-        (soon.length ? '<span class="badge med">' + soon.length + ' يستحق خلال ٣٠ يومًا</span>' : '') +
-        (openTasks.length ? '<span class="badge info">' + openTasks.length + ' مهمة مفتوحة</span>' : '') +
-      '</div></div>' +
-      '<div style="text-align:center;min-width:118px">' +
+      '<div style="flex:1;min-width:180px">' +
+      '<div class="eyebrow">لوحة الامتثال · ' + S.docs.length + ' مستند · ' + ST.today() + '</div>' +
+      '<div class="risk-title">وضعك اليوم<br><b>' + riskWord(pr) + '</b></div>' +
+      (x.conflicts ? '<div class="risk-badges"><span class="badge high">' + x.conflicts +
+        ' بند يخالف المرجع</span></div>' : '') +
+      '</div>' +
+      '<div style="text-align:center;min-width:112px">' +
       '<div class="eyebrow">درجة الخطر</div>' +
       '<div class="risk-num num" style="color:' + riskColor(pr) + '">' + pr + '</div>' +
-      '<div style="font-size:9px;color:var(--text3);letter-spacing:.1em;margin-top:9px">حُدِّثت اليوم ' + ST.today() + '</div>' +
       '</div></div></div>';
 
-    html += '<div class="card"><div class="sectitle">ما يستحق قريبًا</div>';
-    if (over.length) {
-      html += over.slice(0, 3).map(function (x) {
-        return '<button class="linkrow" type="button" data-r="doc" data-id="' + x.doc.id + '">' +
-          '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">متجاوز</span>' +
-          '<span class="lr-body"><b>' + esc(x.g.title) + '</b><i>' + esc(x.doc.name) + '</i></span></button>';
-      }).join('');
-    }
-    html += soon.length ? soon.slice(0, 5).map(function (x) {
-      return '<button class="linkrow" type="button" data-r="doc" data-id="' + x.doc.id + '">' +
-        '<span class="lr-tag" style="color:' + sevColor(x.p.severity) + ';border-color:' + sevColor(x.p.severity) + '">' +
-        x.p.daysRemaining + ' يوم</span>' +
-        '<span class="lr-body"><b>' + esc(x.p.consequence.slice(0, 76)) + '</b><i>' + esc(x.doc.name) + '</i></span></button>';
-    }).join('') : (over.length ? '' : '<div class="empty">لا شيء يستحق خلال الثلاثين يومًا القادمة.</div>');
-    html += '</div>';
+    /* ٢ — أربعة أرقام تنفيذية */
+    html += '<div class="exec">' +
+      execCell(x.openGaps, 'مشكلة مفتوحة', x.totalGaps + ' إجمالًا', 'var(--warning)') +
+      execCell(x.doneGaps, 'مشكلة انحلّت', x.pctDone + '٪ من الكل', 'var(--success)') +
+      execCell(money(x.accruingSum + x.upcomingSum), 'ريال تعرّض مالي',
+        (x.accruingSum ? money(x.accruingSum) + ' جارية' : 'كلها محتملة'), 'var(--danger)') +
+      execCell(x.nextFine ? x.nextFine.o.daysRemaining : '—', 'يومًا لأقرب غرامة',
+        x.nextFine ? money(x.nextFine.o.exposure) + ' ريال' : 'لا غرامة مؤرّخة', 'var(--gold)') +
+      '</div>';
 
+    /* شريط الإنجاز */
+    html += '<div class="card"><div class="sectitle">أين وصلت المعالجة</div>' +
+      '<div class="progress"><div class="pf" style="width:' + x.pctDone + '%"></div></div>' +
+      '<div class="progress-lbl"><span>' + x.doneGaps + ' انحلّت</span>' +
+      '<span>' + x.openGaps + ' ما زالت مفتوحة</span></div></div>';
+
+    /* ٣ — متى تأتي الغرامات وكم تكون */
+    if (x.accruing.length || x.upcoming.length) {
+      html += '<div class="card"><div class="sectitle">الغرامات — متى وكم</div>';
+      if (x.accruing.length) {
+        html += '<div class="grouplbl" style="margin-top:0">جارية الآن</div>' +
+          x.accruing.slice(0, 4).map(function (f) {
+            return '<button class="linkrow" type="button" data-r="doc" data-id="' + f.doc.id + '">' +
+              '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">' +
+              money(f.o.exposure) + '</span><span class="lr-body">' +
+              '<b>متأخر ' + Math.abs(f.o.daysRemaining) + ' يومًا' +
+              (f.o.penaltyPerDay ? ' · ' + money(f.o.penaltyAmount) + ' ريال يوميًا' : '') + '</b>' +
+              '<i>' + esc(f.doc.name) + '</i></span></button>';
+          }).join('');
+      }
+      if (x.upcoming.length) {
+        html += '<div class="grouplbl">قادمة</div>' +
+          x.upcoming.slice(0, 5).map(function (f) {
+            return '<button class="linkrow" type="button" data-r="doc" data-id="' + f.doc.id + '">' +
+              '<span class="lr-tag" style="color:var(--warning);border-color:var(--warning)">' +
+              money(f.o.exposure) + '</span><span class="lr-body">' +
+              '<b>بعد ' + f.o.daysRemaining + ' يومًا · ' +
+              new Date(f.o.deadlineTS).toISOString().slice(0, 10) + '</b>' +
+              '<i>' + esc(f.doc.name) + '</i></span></button>';
+          }).join('');
+      }
+      html += '<div class="note">تقدير مستخرج من نصوص الجزاءات، لا التزام محاسبي. ' +
+        'الغرامة اليومية تُضرب في أيام التأخر.</div></div>';
+    }
+
+    /* ٤ — المتجاوز */
+    if (over.length) {
+      html += '<div class="card"><div class="sectitle">مواعيد انقضت</div>' +
+        over.slice(0, 4).map(function (o) {
+          return '<button class="linkrow" type="button" data-r="doc" data-id="' + o.doc.id + '">' +
+            '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">متجاوز</span>' +
+            '<span class="lr-body"><b>' + esc(o.g.title) + '</b><i>' + esc(o.doc.name) + '</i></span></button>';
+        }).join('') + '</div>';
+    }
+
+    /* ٥ — ما تحرّك */
     if (moves.length) {
       html += '<div class="card"><div class="sectitle">ما تغيّر منذ آخر فتح</div>' +
-        moves.slice(0, 5).map(function (m) {
+        moves.slice(0, 4).map(function (m) {
           var up = m.d.diff > 0;
           return '<button class="linkrow" type="button" data-r="doc" data-id="' + m.doc.id + '">' +
             '<span class="lr-tag" style="color:' + (up ? 'var(--danger)' : 'var(--success)') + ';border-color:transparent">' +
@@ -333,9 +414,12 @@
         }).join('') + '</div>';
     }
 
-    html += '<div class="row-btns"><button class="btn" data-r="upload">تحليل مستند جديد</button>' +
-      '<button class="btn ghost" data-r="plan">خطة المعالجة</button></div>';
+    html += '<button class="btn ghost" data-r="upload" style="margin-top:4px">تحليل مستند جديد</button>';
     el.innerHTML = html; wire(el);
+  }
+  function execCell(v, l, s2, c) {
+    return '<div class="exec-cell"><div class="v num" style="color:' + c + '">' + v + '</div>' +
+      '<div class="l">' + l + '</div><div class="s">' + esc(s2) + '</div></div>';
   }
 
   /* ═══════════ ٢. المستندات ═══════════ */
@@ -397,7 +481,8 @@
   }
 
   /* ═══════════ ٣. صفحة المستند ═══════════ */
-  var TABS = [['sum', 'نظرة عامة'], ['gaps', 'الفجوات'], ['dl', 'المواعيد'], ['rep', 'التقرير']];
+  var TABS = [['sum', 'نظرة عامة'], ['gaps', 'الفجوات'], ['dl', 'المواعيد'],
+              ['fix', 'التعديلات'], ['rep', 'التقرير']];
   function renderDoc() {
     var el = $('pageContent'), doc = ST.get(S.openDoc);
     if (!doc) { go('docs'); return; }
@@ -411,14 +496,16 @@
       (doc.truncated ? 'اقتُطع النص عند ' + ST.MAX_TEXT.toLocaleString('en-US') + ' حرف · ' : '') +
       'حُدِّث اليوم ' + ST.today() + '</p>' +
       '<div class="filters">' + TABS.map(function (t) {
-        return '<button class="filter-btn' + (S.docTab === t[0] ? ' active' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>';
+        var n = t[0] === 'fix' ? (r.conflicts || []).length : 0;
+        return '<button class="filter-btn' + (S.docTab === t[0] ? ' active' : '') + '" data-tab="' + t[0] + '">' +
+          t[1] + (n ? ' <b style="color:var(--danger);font-weight:600">' + n + '</b>' : '') + '</button>';
       }).join('') + '</div><div id="tabBody"></div>';
     el.innerHTML = html; wire(el);
     var ts = el.querySelectorAll('[data-tab]');
     for (var i = 0; i < ts.length; i++) {
       (function (b) { b.addEventListener('click', function () { S.docTab = b.dataset.tab; renderDoc(); }); })(ts[i]);
     }
-    ({ sum: tabSum, gaps: tabGaps, dl: tabDeadlines, rep: tabReport })[S.docTab](doc, r);
+    ({ sum: tabSum, gaps: tabGaps, dl: tabDeadlines, fix: tabFix, rep: tabReport })[S.docTab](doc, r);
   }
 
   function tabSum(doc, r) {
@@ -559,6 +646,143 @@
         '<div class="pred-rec">' + esc(p.recommendation) + '</div></div></div>';
     }).join('');
     $('tabBody').innerHTML = html; wire($('tabBody'));
+  }
+
+  /* ═══ تبويب التعديلات: إصدار بند معدَّل وتعميم ═══ */
+  function tabFix(doc, r) {
+    var body = $('tabBody');
+    if (!doc.refText) {
+      body.innerHTML = '<div class="card"><div class="empty">' +
+        'كشف التعارض يحتاج مرجعًا تنظيميًا لمقارنة سياستك به.<br>الصق نص المرجع هنا ليُفحص المستند فورًا.</div>' +
+        '<textarea id="addRef" placeholder="الصق نص المرجع التنظيمي..." style="min-height:120px"></textarea>' +
+        '<button class="btn" id="saveRef" style="margin-top:12px">افحص التعارض</button></div>';
+      $('saveRef').addEventListener('click', function () {
+        var t = ($('addRef').value || '').trim();
+        if (!t) return;
+        ST.update(doc.id, { refText: t.slice(0, ST.MAX_TEXT) });
+        AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+                 title: 'إضافة مرجع تنظيمي', detail: doc.name });
+        refreshAll(); renderDoc();
+      });
+      return;
+    }
+    if (!r.conflicts.length) {
+      body.innerHTML = '<div class="card"><div class="empty">' +
+        'لم نجد بندًا في هذا المستند يفعل ما يمنعه المرجع.<br>' +
+        'يُرصد التعارض حين يمنع المرجعُ شيئًا وتفرضه سياستك في الموضوع نفسه.</div></div>';
+      return;
+    }
+
+    var v = doc.fixVars || {};
+    var f = function (id, label, val, ph) {
+      return '<div><label class="field-label" for="' + id + '">' + label + '</label>' +
+        '<input type="text" id="' + id + '" value="' + esc(val || '') + '" placeholder="' + ph + '"></div>';
+    };
+    var html = '<div class="warnbox">هذه مسودات قالبية تُولَّد من نصّي سياستك والمرجع. ' +
+      'راجعها قانونيًا وعدّلها قبل الاعتماد — نذير لا يصدر تعاميم، بل يجهّز مسودتها.</div>';
+
+    html += '<div class="card"><div class="sectitle">بيانات الإصدار</div><div class="fixgrid">' +
+      f('fxOrg', 'اسم الجهة', v.org, 'مثال: بنك الواحة') +
+      f('fxNum', 'رقم التعميم', v.number, '2026/14') +
+      f('fxEff', 'تاريخ النفاذ', v.effectiveDate, 'YYYY-MM-DD') +
+      f('fxOwner', 'الإدارة المختصة', v.owner, 'قطاع الخدمات المصرفية') +
+      f('fxRef', 'اسم المرجع', v.refName, 'تعليمات الرسوم') +
+      f('fxDays', 'مهلة التحديث (أيام)', v.days, '30') +
+      '</div></div>';
+
+    html += r.conflicts.map(function (c, i) {
+      var skipped = (v.skip || {})[c.code];
+      return '<div class="fixcard' + (skipped ? ' off' : '') + '">' +
+        '<div class="gap-head"><div><div class="gap-title">' + esc(c.core) + '</div>' +
+        '<div class="gap-meta"><span class="code">' + c.code + '</span>' +
+        '<span class="gap-type">تطابق الموضوع ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') + '</span></div></div>' +
+        '<label class="tick"><input type="checkbox" data-skip="' + c.code + '"' + (skipped ? '' : ' checked') + '> تضمين</label></div>' +
+        '<div class="fixside"><div class="fs-lbl">المرجع يمنع</div>' +
+        '<button type="button" class="evidence" data-q="' + esc(c.refQuote) + '" data-src="ref">' +
+        '<span class="lb">' + esc(c.refArticle || 'من المرجع') + '</span>«' + esc(c.refQuote) + '»</button></div>' +
+        '<div class="fixside"><div class="fs-lbl bad">سياستك تفرض</div>' +
+        '<button type="button" class="evidence" data-q="' + esc(c.docQuote) + '">' +
+        '<span class="lb">' + esc(c.docArticle || 'من سياستك') + '</span>«' + esc(c.docQuote) + '»</button></div>' +
+        '<div class="fixside"><div class="fs-lbl good">البند بعد التعديل — حرّره كما تشاء</div>' +
+        '<textarea class="fixprop" data-prop="' + c.code + '"' +
+        ((v.edits || {})[c.code] ? ' data-touched="1"' : '') + ' style="min-height:104px">' +
+        esc((v.edits || {})[c.code] || CF.proposeClause(c, v)) + '</textarea></div></div>';
+    }).join('');
+
+    html += '<div class="row-btns"><button class="btn" id="fxCirc">تنزيل التعميم</button>' +
+      '<button class="btn ghost" id="fxPol">تنزيل السياسة المعدّلة</button></div><div id="fxMsg"></div>';
+    body.innerHTML = html; wire(body);
+
+    /* لا نُعيد رسم الصفحة عند تغيير أي حقل: إعادة الرسم تُتلف الحقل الذي
+       انتقل إليه المستخدم للتو فيضيع ما كتبه. نحفظ بصمت فقط. */
+    var persist = function () {
+      var nv = fixVars(), edits = {}, skip = {};
+      var ta = body.querySelectorAll('[data-prop]');
+      for (var i = 0; i < ta.length; i++) {
+        if (ta[i].dataset.touched) edits[ta[i].dataset.prop] = ta[i].value;
+      }
+      var cb = body.querySelectorAll('[data-skip]');
+      for (var j = 0; j < cb.length; j++) if (!cb[j].checked) skip[cb[j].dataset.skip] = 1;
+      nv.edits = edits; nv.skip = skip;
+      ST.update(doc.id, { fixVars: nv });
+      return nv;
+    };
+    ['fxOrg', 'fxNum', 'fxEff', 'fxOwner', 'fxRef', 'fxDays'].forEach(function (id) {
+      $(id).addEventListener('change', persist);
+    });
+    var cbs = body.querySelectorAll('[data-skip]');
+    for (var k = 0; k < cbs.length; k++) {
+      (function (cb) {
+        cb.addEventListener('change', function () {
+          var card = cb.closest ? cb.closest('.fixcard') : null;
+          if (card) card.classList.toggle('off', !cb.checked);
+          persist();
+        });
+      })(cbs[k]);
+    }
+    var tas = body.querySelectorAll('[data-prop]');
+    for (var m = 0; m < tas.length; m++) {
+      (function (ta) {
+        ta.addEventListener('input', function () { ta.dataset.touched = '1'; });
+        ta.addEventListener('blur', persist);
+      })(tas[m]);
+    }
+
+    /* المسودة غير المحرَّرة تُعاد توليدها وقت التصدير بأحدث البيانات،
+       والمحرَّرة تبقى كما كتبها المستخدم. */
+    var chosen = function (nv) {
+      return r.conflicts.filter(function (c) { return !(nv.skip || {})[c.code]; })
+        .map(function (c) {
+          var cc = {}; Object.keys(c).forEach(function (k2) { cc[k2] = c[k2]; });
+          cc.editedProposal = (nv.edits || {})[c.code] || null;
+          return cc;
+        });
+    };
+    $('fxCirc').addEventListener('click', function () {
+      var nv = persist(), list = chosen(nv);
+      if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }
+      saveText('nadheer-تعميم-' + doc.caseCode + '.txt', CF.buildCircular(list, nv));
+      AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+               title: 'إصدار مسودة تعميم', detail: list.length + ' بندًا · ' + doc.name });
+      $('fxMsg').innerHTML = '<div class="okbox">نُزّلت مسودة التعميم — راجعها واعتمدها قبل الإصدار.</div>';
+    });
+    $('fxPol').addEventListener('click', function () {
+      var nv = persist(), list = chosen(nv);
+      if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }
+      var out = CF.buildAmendedPolicy(doc.text, list, nv);
+      saveText('nadheer-سياسة-معدلة-' + doc.caseCode + '.txt', out.text);
+      AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+               title: 'إصدار مسودة سياسة معدّلة', detail: out.applied + ' بندًا عُدّل · ' + doc.name });
+      $('fxMsg').innerHTML = '<div class="okbox">نُزّلت السياسة بعد تعديل ' + out.applied + ' بندًا.</div>';
+    });
+
+    function fixVars() {
+      return { org: val('fxOrg', v.org), number: val('fxNum', v.number),
+               effectiveDate: val('fxEff', v.effectiveDate), owner: val('fxOwner', v.owner),
+               refName: val('fxRef', v.refName), days: val('fxDays', v.days),
+               docName: doc.name, edits: v.edits, skip: v.skip };
+    }
+    function val(id, dflt) { var e = $(id); return e ? (e.value || '').trim() : (dflt || ''); }
   }
 
   function tabReport(doc, r) {

@@ -399,6 +399,34 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 
 .subcard{border:1px solid var(--line);padding:14px;margin-bottom:10px}
 .grouplbl{font-size:10px;color:var(--gold);letter-spacing:.12em;margin:18px 0 8px}
+
+/* ── الداشبورد التنفيذي ── */
+.exec{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:14px}
+.exec-cell{background:var(--bg);padding:20px 15px;text-align:right}
+.exec-cell .v{font-size:30px;letter-spacing:-.02em}
+.exec-cell .l{font-size:10.5px;color:var(--text2);margin-top:7px;letter-spacing:.03em}
+.exec-cell .s{font-size:9.5px;color:var(--text3);margin-top:4px}
+.progress{height:5px;background:rgba(255,255,255,.05);overflow:hidden}
+.progress .pf{height:100%;background:var(--success)}
+.progress-lbl{display:flex;justify-content:space-between;margin-top:9px;font-size:10.5px;color:var(--text3);letter-spacing:.03em}
+.note{font-size:9.5px;color:var(--text3);line-height:1.85;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* ── صفحة التعديلات ── */
+.warnbox{border:1px solid rgba(242,153,74,.34);background:rgba(242,153,74,.06);color:#F7B274;
+  padding:13px 15px;border-radius:2px;font-size:11.5px;line-height:1.9;margin-bottom:16px;font-weight:300}
+.fixgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fixgrid .field-label{margin-top:0}
+.fixcard{border:1px solid var(--line);border-right:2px solid var(--danger);border-radius:3px;
+  padding:18px;margin-bottom:12px;background:var(--card)}
+.fixcard.off{opacity:.42;border-right-color:var(--text3)}
+.fixside{margin-top:14px}
+.fs-lbl{font-size:9px;letter-spacing:.12em;color:var(--text3);margin-bottom:6px}
+.fs-lbl.bad{color:var(--danger)}
+.fs-lbl.good{color:var(--success)}
+.fixprop{background:rgba(95,211,168,.05);border-color:rgba(95,211,168,.28);line-height:1.95}
+.tick{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--text3);white-space:nowrap;cursor:pointer}
+.tick input{accent-color:var(--gold);width:14px;height:14px}
+@media(max-width:520px){.fixgrid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -546,6 +574,16 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       { term:'ما يلزم',             why:'نطاق الالتزام غير محدد' },
       { term:'الجهة المختصة',       why:'لم تُسمَّ الجهة صراحة' }
     ],
+
+    /* كشف التعارض بين سياستك والمرجع */
+    conflict: {
+      prohibitions: ['يحظر','يُحظر','لا يجوز','يمنع','يُمنع','ممنوع','لا تُفرض','لا يُفرض',
+        'عدم فرض','لا يجوز تحصيل','يُحظر تحصيل','لا يُسمح','تُلغى','يُلغى','بدون رسوم','دون مقابل','مجاناً'],
+      impositions: ['تفرض','تُفرض','يفرض','يُفرض','يُحصَّل','تُحصّل','يحصل','تستوفي','تُستوفى',
+        'يُستوفى','رسوم','رسم','عمولة','أجور','مقابل مالي','تعرفة'],
+      minTopicScore: 0.34,
+      impact: 1.00
+    },
 
     /* معاملات الحساب */
     scoring: {
@@ -852,6 +890,8 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   /* ═══════════ ٦. الالتزامات والجزاءات ═══════════ */
 
   var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
+  /* «عن كل يوم تأخير» تعني غرامة تتراكم — مبلغها الفعلي = القيمة × أيام التأخر */
+  var PER_DAY = null;
 
   /* يترجم إعدادات المستخدم (نص عربي خام) إلى صيغ مطبَّعة، مرة واحدة لكل إعداد.
      الذاكرة المؤقتة مفتاحها بصمة الإعداد، فتعديل الإدارة يُعاد ترجمته فورًا. */
@@ -859,6 +899,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   function compile(cfg) {
     var key = JSON.stringify(cfg);
     if (_cc.key === key) return _cc.val;
+    STRUCTURAL = null;                       // قائمة الكلمات الهيكلية تتبع الإعداد
     var c = {
       raw: cfg,
       deontic: normList(cfg.deontic || []),
@@ -879,15 +920,21 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   }
 
   function classifyPenalty(normSentence, C) {
+    if (!PER_DAY) PER_DAY = normList(['عن كل يوم', 'لكل يوم', 'يومياً', 'يوميا', 'عن كل يوم تأخير', 'غرامة يومية']);
+    var money = normSentence.match(MONEY);
+    var amount = money ? parseFloat(money[1].replace(/,/g, '')) : null;
+    if (amount !== null && !isFinite(amount)) amount = null;
+    var perDay = !!(amount !== null && hasAny(normSentence, PER_DAY));
     for (var i = 0; i < C.penaltyTiers.length; i++) {
       var hit = hasAny(normSentence, C.penaltyTiers[i].terms);
       if (hit) {
-        var t = C.penaltyTiers[i], money = normSentence.match(MONEY);
+        var t = C.penaltyTiers[i];
         return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
-                 label: money ? t.label + ' (' + money[0].trim() + ')' : t.label };
+                 label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') + ')' : t.label,
+                 amount: amount, currency: money ? money[2] : null, perDay: perDay };
       }
     }
-    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel };
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false };
   }
 
   /* ═══════════ أكواد التتبّع ═══════════ */
@@ -974,6 +1021,9 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   var STRUCTURAL = null, CC = null;
   function structuralWords() {
     if (STRUCTURAL) return STRUCTURAL;
+    // contentWords قد تُستدعى من خارج analyze (كاشف التعارض مثلًا)،
+    // فنسقط على الإعدادات الافتراضية بدل الانهيار.
+    if (!CC) CC = compile(NC.DEFAULTS);
     STRUCTURAL = {};
     STOP.concat(CC.deontic, CC.parties).forEach(function (t) {
       t.split(' ').forEach(function (w) { if (w.length > 1) STRUCTURAL[w] = 1; });
@@ -1060,6 +1110,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         rawDeadline: source, deadlineTS: d, approxDate: approx,
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
+        penaltyAmount: pen.amount, penaltyCurrency: pen.currency, penaltyPerDay: pen.perDay,
         probability: probFromDays(days, sc),
         risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
@@ -1068,6 +1119,15 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     });
     obligations.forEach(function (o, i) {
       o.severity = sevFromRisk(o.risk, sc);
+      /* التعرض المالي: المتجاوز غرامته جارية (× أيام التأخر إن كانت يومية)،
+         والقادم غرامته محتملة عند التخلف. */
+      o.exposure = null;
+      if (o.penaltyAmount !== null && o.penaltyAmount !== undefined && o.daysRemaining !== null) {
+        o.exposure = o.penaltyPerDay && o.daysRemaining < 0
+          ? o.penaltyAmount * Math.min(-o.daysRemaining, 3650)
+          : o.penaltyAmount;
+        o.exposureAccruing = o.daysRemaining < 0;
+      }
       o.key = normStr(o.quote).slice(0, 70);
       o.index = i;
     });
@@ -1287,7 +1347,8 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
-    makeCode: makeCode, shortHash: shortHash, compile: compile
+    makeCode: makeCode, shortHash: shortHash, compile: compile,
+    stem: stem, contentWords: contentWords, normList: normList, hasAny: hasAny
   };
 });
 </script>
@@ -1518,11 +1579,257 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
            usage: usage, clear: clear, today: today, MAX_TEXT: MAX_TEXT };
 });
 </script>
+<script>/* نذير — كشف التعارض وإصدار التعديلات.
+   يرصد بندًا في سياستك يفعل ما يمنعه المرجع (أو العكس)، ويولّد مسودة
+   بند بديل ومسودة تعميم. القوالب حتمية ولا نموذج لغوي هنا — والمسودة
+   تُحرَّر وتُعتمد بشريًا قبل الإصدار. */
+(function (root, factory) {
+  var deps = (typeof module === 'object' && module.exports)
+    ? { E: require('./engine.js'), NC: require('./config.js') }
+    : { E: root.NadheerEngine, NC: root.NadheerConfig };
+  var api = factory(deps.E, deps.NC);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.NadheerConflicts = api;
+})(typeof self !== 'undefined' ? self : this, function (E, NC) {
+  'use strict';
+
+  var MONEY = /(\d[\d,\.]*)\s*(ريال|ر\.س|sar|درهم|دولار)/;
+  var TOPK = 6;
+
+  function cfgOf(c) { return NC.merge(NC.DEFAULTS, c || null); }
+
+  /* هل الجملة تمنع؟ هل تفرض؟ الجملة التي تمنع لا تُعدّ فارضة ولو ورد فيها
+     لفظ الرسوم — «لا يجوز فرض رسوم» منعٌ لا فرض. */
+  function classify(normSentence, C) {
+    var prohibits = E.hasAny(normSentence, C.proh);
+    var imposes   = E.hasAny(normSentence, C.imp);
+    var requires  = E.hasAny(normSentence, C.req);
+    return {
+      prohibits: !!prohibits, prohibitTerm: prohibits,
+      imposes: !!imposes && !prohibits, imposeTerm: imposes,
+      requires: !!requires && !prohibits
+    };
+  }
+
+  /* الموضوع المشترك يُقاس بأميز الكلمات (الأندر في المرجع) بعد التجذير */
+  function topicScore(needStems, hayStems, idf) {
+    var total = needStems.reduce(function (a, w) { return a + idf(w); }, 0);
+    if (!total) return 0;
+    var hit = needStems.reduce(function (a, w) { return a + (hayStems.indexOf(w) > -1 ? idf(w) : 0); }, 0);
+    return hit / total;
+  }
+
+  /* ما الذي يُفرض؟ نأخذ ما بين لفظ الفرض وبداية المبلغ. */
+  function subjectOf(rawSentence) {
+    var t = rawSentence.replace(/\s+/g, ' ').trim();
+    var m = t.match(/(?:تفرض|تُفرض|يفرض|يُفرض|يُحصَّل|تُحصّل|يحصل|تستوفي|تُستوفى|يُستوفى)\s+(.{4,120}?)(?=\s*(?:بمبلغ|بقيمة|قدره|قدرها|مقدارها|بواقع|\d|،|\.|$))/);
+    if (m) return m[1].trim();
+    var f = t.match(/((?:رسوم|رسم|عمولة|أجور|مقابل مالي)[^،\.]{0,90})/);
+    return f ? f[1].trim() : 'الرسوم الواردة في هذا البند';
+  }
+  /* «مقابل مالي عن إصدار الكشف» → «إصدار الكشف»، وإلا خرجت الصياغة
+     «لا تُفرض ... على عن إصدار» بحرفَي جر متتاليين. */
+  function coreOf(subject) {
+    var c = subject.replace(/^(رسوم|رسم|عمولة|عمولات|أجور|مقابل مالي|تعرفة)\s*/, '').trim();
+    c = c.replace(/^(عن|على|من|في|لـ|ل)\s+/, '').trim();
+    return c || subject;
+  }
+  function amountOf(rawSentence) {
+    var m = rawSentence.replace(/\s+/g, ' ').match(MONEY);
+    return m ? m[0].trim() : null;
+  }
+  /* رقم المادة إن ذُكر، ليُشار إليه في التعميم */
+  /* نحافظ على صيغة المادة كما وردت: «المادة (2)» تبقى بقوسين،
+     و«المادة الثالثة» تبقى بلا قوسين. */
+  function articleOf(rawSentence) {
+    var t = rawSentence.replace(/\s+/g, ' ');
+    var paren = t.match(/الماد[هة]\s*\(\s*([^\)]{1,14})\s*\)/);
+    if (paren) return 'المادة (' + paren[1].trim() + ')';
+    var word = t.match(/الماد[هة]\s+([^\s:،\.]{2,14})/);
+    return word ? 'المادة ' + word[1].trim() : null;
+  }
+
+  function detect(opts) {
+    var raw = cfgOf(opts.config);
+    var C = {
+      proh: E.normList(raw.conflict.prohibitions),
+      imp:  E.normList(raw.conflict.impositions),
+      req:  E.normList(raw.deontic)
+    };
+    var minScore = raw.conflict.minTopicScore;
+
+    var dn = E.normMap(opts.docText || ''), rn = E.normMap(opts.refText || '');
+    if (!rn.norm.trim() || !dn.norm.trim()) return { conflicts: [], reason: 'no-ref' };
+
+    var dS = E.splitSentences(dn.norm), rS = E.splitSentences(rn.norm);
+    var quote = function (map, text, s) {
+      return text.slice(map[s.start], map[Math.min(s.end, map.length) - 1] + 1).trim();
+    };
+
+    // الندرة تُقاس على المرجع نفسه — الكلمة الغائبة عن سياستك ليست «مميزة»
+    var refSets = rS.map(function (s) { return E.contentWords(s.text); });
+    var df = {};
+    refSets.forEach(function (ws) {
+      var once = {};
+      ws.forEach(function (w) { if (!once[w]) { once[w] = 1; df[w] = (df[w] || 0) + 1; } });
+    });
+    var N = Math.max(1, refSets.length);
+    var idf = function (w) { return Math.log(1 + N / (1 + (df[w] || 0))); };
+
+    var docSets = dS.map(function (s) { return E.contentWords(s.text); });
+    var docCls = dS.map(function (s) { return classify(s.text, C); });
+    var out = [];
+
+    rS.forEach(function (rs, ri) {
+      var rc = classify(rs.text, C);
+      if (!rc.prohibits && !rc.requires) return;
+      var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+      if (!need.length) return;
+
+      dS.forEach(function (ds, di) {
+        var dc = docCls[di];
+        // تعارض حقيقي: المرجع يمنع وسياستك تفرض، أو المرجع يوجب وسياستك تمنع
+        var kind = (rc.prohibits && dc.imposes) ? 'يمنعه المرجع وسياستك تفرضه'
+                 : (rc.requires && dc.prohibits) ? 'يوجبه المرجع وسياستك تمنعه' : null;
+        if (!kind) return;
+        var score = topicScore(need, docSets[di], idf);
+        if (score < minScore) return;
+
+        var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+        var subject = subjectOf(docQ), amount = amountOf(docQ);
+        out.push({
+          kind: kind, score: Math.round(score * 100),
+          refQuote: refQ, refArticle: articleOf(refQ),
+          docQuote: docQ, docArticle: articleOf(docQ),
+          subject: subject, core: coreOf(subject), amount: amount,
+          topic: need,
+          key: E.normStr(docQ).slice(0, 70)
+        });
+      });
+    });
+
+    // بند واحد قد يعارض عدة مواد — نُبقي أقوى تطابق لكل بند
+    var best = {};
+    out.forEach(function (c) {
+      if (!best[c.key] || c.score > best[c.key].score) best[c.key] = c;
+    });
+    var list = Object.keys(best).map(function (k) { return best[k]; })
+                 .sort(function (a, b) { return b.score - a.score; });
+
+    var fp = E.normStr(opts.docText).slice(0, 40000);
+    list.forEach(function (c) { c.code = E.makeCode('CF', fp, c.key); });
+    return { conflicts: list };
+  }
+
+  /* ═══ مسودة البند البديل ═══ */
+  function proposeClause(c, vars) {
+    var v = vars || {};
+    var ref = (c.refArticle ? c.refArticle + ' من ' : '') + (v.refName || 'المرجع التنظيمي');
+    var art = c.docArticle || 'هذا البند';
+    if (c.kind.indexOf('تفرضه') > -1) {
+      return art + ' (معدَّلة):\n' +
+        'لا تُفرض أي رسوم أو عمولات أو مقابل مالي على ' + c.core + '، ' +
+        'التزامًا بما ورد في ' + ref + '.\n' +
+        (c.amount ? 'وتُلغى الرسوم البالغة ' + c.amount + ' المنصوص عليها سابقًا، ' : 'وتُلغى الرسوم المنصوص عليها سابقًا، ') +
+        'ويُوقف تحصيلها اعتبارًا من ' + (v.effectiveDate || '[تاريخ النفاذ]') + '.';
+    }
+    return art + ' (معدَّلة):\n' +
+      'يُلتزم بما ورد في ' + ref + ' بشأن ' + c.core + '، ' +
+      'ويُلغى كل ما يخالف ذلك في هذا البند اعتبارًا من ' +
+      (v.effectiveDate || '[تاريخ النفاذ]') + '.';
+  }
+
+  /* ═══ مسودة التعميم الداخلي ═══ */
+  function buildCircular(conflicts, vars) {
+    var v = vars || {};
+    var org = v.org || '[اسم الجهة]';
+    var num = v.number || '[رقم التعميم]';
+    var date = v.date || new Date().toISOString().slice(0, 10);
+    var eff = v.effectiveDate || '[تاريخ النفاذ]';
+    var owner = v.owner || '[الإدارة المختصة]';
+    var days = v.days || '30';
+    var subject = conflicts.length === 1 ? conflicts[0].core : 'بنود السياسة المخالفة للمرجع التنظيمي';
+
+    var t = '';
+    t += '⚠ مسودة — لم تُعتمد بعد. تُراجَع قانونيًا وتُعتمد قبل الإصدار.\n';
+    t += Array(64).join('─') + '\n\n';
+    t += org + '\n';
+    t += 'تعميم داخلي رقم ' + num + '\n';
+    t += 'التاريخ: ' + date + '\n';
+    t += 'الموضوع: تعديل ' + subject + ' بما يوافق ' + (v.refName || 'المرجع التنظيمي') + '\n\n';
+    t += Array(64).join('─') + '\n\n';
+
+    var n2 = conflicts.length;
+    var countPhrase = n2 === 1 ? 'بندٍ واحد يخالف'
+                    : n2 === 2 ? 'بندين يخالفان'
+                    : n2 + ' بنودٍ تخالف';
+    t += 'استنادًا إلى ' + (v.refName || 'المرجع التنظيمي') + '، وبعد مراجعة السياسة الداخلية ' +
+         (v.docName ? '«' + v.docName + '»' : '') + '، تبيّن وجود ' + countPhrase + ' ما ورد في المرجع.\n\n';
+
+    conflicts.forEach(function (c, i) {
+      t += (conflicts.length > 1 ? '(' + (i + 1) + ') ' : '') + 'حيث نص ' +
+           (c.refArticle ? c.refArticle + ' من المرجع' : 'المرجع') + ' على:\n';
+      t += '    «' + c.refQuote.replace(/\s+/g, ' ') + '»\n\n';
+      t += 'وحيث ' + (c.docArticle ? 'نصت ' + c.docArticle + ' من السياسة' : 'نصت السياسة') + ' على:\n';
+      t += '    «' + c.docQuote.replace(/\s+/g, ' ') + '»\n\n';
+    });
+
+    t += Array(64).join('─') + '\n';
+    t += 'يُعمَّم على جميع القطاعات والفروع ما يلي:\n\n';
+    var n = 1;
+    conflicts.forEach(function (c) {
+      if (c.kind.indexOf('تفرضه') > -1) {
+        t += (n++) + '. يُوقف فورًا تحصيل ' + c.subject +
+             (c.amount ? ' البالغة ' + c.amount : '') + '، وتُعدّ ملغاة اعتبارًا من ' + eff + '.\n';
+      } else {
+        t += (n++) + '. يُلتزم بما ورد في المرجع بشأن ' + c.core + ' اعتبارًا من ' + eff + '.\n';
+      }
+    });
+    t += (n++) + '. على ' + owner + ' تحديث الأنظمة والنماذج وقوائم التعرفة خلال ' + days + ' يومًا من تاريخه.\n';
+    t += (n++) + '. تُعاد أي مبالغ حُصّلت بعد ' + eff + ' خلافًا لهذا التعميم.\n';
+    t += (n++) + '. يُعدّ هذا التعميم جزءًا لا يتجزأ من السياسة المشار إليها، ويُلغى كل ما يخالفه.\n\n';
+
+    t += Array(64).join('─') + '\n';
+    t += 'نص البنود بعد التعديل:\n\n';
+    conflicts.forEach(function (c) { t += proposeClause(c, v) + '\n\n'; });
+
+    t += Array(64).join('─') + '\n';
+    t += 'للاعتماد:\n\n';
+    t += '    المراجعة القانونية: ....................  التاريخ: ..........\n\n';
+    t += '    الاعتماد:            ....................  التاريخ: ..........\n\n';
+    t += 'أُنشئت هذه المسودة آليًا بواسطة نذير من مقارنة نصّي السياسة والمرجع.\n';
+    t += 'الصياغة قالبية وتحتاج مراجعة بشرية — لا تُصدر قبل الاعتماد.\n';
+    return t;
+  }
+
+  /* ═══ السياسة كاملة بعد استبدال البنود المتعارضة ═══ */
+  function buildAmendedPolicy(docText, conflicts, vars) {
+    var v = vars || {}, out = docText, applied = 0;
+    conflicts.forEach(function (c) {
+      if (c.skip) return;
+      var body = (c.editedProposal || proposeClause(c, v));
+      var idx = out.indexOf(c.docQuote);
+      if (idx === -1) return;                   // النص تغيّر بعد الكشف
+      out = out.slice(0, idx) + body + out.slice(idx + c.docQuote.length);
+      applied++;
+    });
+    var head = '⚠ مسودة معدَّلة — لم تُعتمد بعد. تُراجَع قانونيًا قبل الإصدار.\n' +
+      'أُنشئت بواسطة نذير في ' + new Date().toISOString().slice(0, 10) +
+      ' · عُدِّل ' + applied + ' من ' + conflicts.length + ' بندًا متعارضًا.\n' +
+      Array(64).join('─') + '\n\n';
+    return { text: head + out, applied: applied };
+  }
+
+  return { detect: detect, proposeClause: proposeClause,
+           buildCircular: buildCircular, buildAmendedPolicy: buildAmendedPolicy,
+           subjectOf: subjectOf, amountOf: amountOf };
+});
+</script>
 <script>/* نذير — الواجهة. لا يوجد أي طلب شبكة في هذا الملف. */
 (function () {
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
-      AU = window.NadheerAudit, ST = window.NadheerStore;
+      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -1647,6 +1954,25 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   function analyzeDoc(doc) {
     var res = E.analyze({ docText: doc.text, refText: doc.refText, context: doc.context, config: S.cfg });
     res.docId = doc.id; res.docName = doc.name; res.caseCode = doc.caseCode;
+
+    /* التعارض المباشر أخطر من الفجوة: بندٌ في سياستك يفعل ما يمنعه المرجع.
+       يدخل قائمة الفجوات ليظهر في الخطر وخطة المعالجة، ويقود صفحة التعديلات. */
+    res.conflicts = doc.refText ? CF.detect({ docText: doc.text, refText: doc.refText, config: S.cfg }).conflicts : [];
+    var ci = S.cfg.conflict.impact;
+    res.conflicts.forEach(function (c) {
+      var risk = E.itemRisk(0.95, ci, null, S.cfg.scoring);
+      res.gaps.unshift({
+        code: c.code, key: 'تعارض|' + c.key, type: 'تعارض مع المرجع',
+        title: 'بند يخالف المرجع: ' + c.core,
+        description: 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') +
+                     '. تطابق الموضوع ' + c.score + '٪.',
+        recommendation: 'أصدر البند المعدَّل والتعميم من صفحة «التعديلات».',
+        evidence: c.docQuote, evidenceType: 'quote',
+        probability: 0.95, impact: ci, decay: 1, risk: risk,
+        severity: E.sevFromRisk(risk, S.cfg.scoring), conflict: c
+      });
+    });
+    res.gaps.sort(function (a, b) { return b.risk - a.risk; });
     // الفجوات المُنجزة تخرج من الحساب — إغلاق مهمة يخفض الخطر فعلًا
     var open = res.gaps.filter(function (g) { return ST.taskOf(doc, g.code).status !== 'done'; });
     res.openGaps = open;
@@ -1694,6 +2020,34 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     });
     return out;
   }
+  /* أرقام الداشبورد التنفيذي — تُجمَع من كل المستندات */
+  function exec() {
+    var openGaps = 0, doneGaps = 0, totalGaps = 0, conflicts = 0;
+    var accruing = [], upcoming = [];
+    S.docs.forEach(function (d) {
+      var r = S.analyses[d.id]; if (!r) return;
+      totalGaps += r.gaps.length; openGaps += r.openGaps.length; doneGaps += r.doneCount;
+      conflicts += (r.conflicts || []).length;
+      r.obligations.forEach(function (o) {
+        if (o.exposure === null || o.exposure === undefined) return;
+        (o.exposureAccruing ? accruing : upcoming).push({ doc: d, o: o });
+      });
+    });
+    accruing.sort(function (a, b) { return b.o.exposure - a.o.exposure; });
+    upcoming.sort(function (a, b) { return a.o.daysRemaining - b.o.daysRemaining; });
+    var sum = function (l) { return l.reduce(function (a, x) { return a + x.o.exposure; }, 0); };
+    return {
+      openGaps: openGaps, doneGaps: doneGaps, totalGaps: totalGaps, conflicts: conflicts,
+      pctDone: totalGaps ? Math.round(doneGaps / totalGaps * 100) : 0,
+      accruing: accruing, upcoming: upcoming,
+      accruingSum: sum(accruing), upcomingSum: sum(upcoming),
+      nextFine: upcoming.length ? upcoming[0] : null
+    };
+  }
+  var money = function (n) {
+    return Math.round(n).toLocaleString('en-US');
+  };
+
   function allTasks() {
     var out = [];
     S.docs.forEach(function (d) {
@@ -1790,17 +2144,12 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         '<div style="color:var(--gold);display:flex;justify-content:center;margin-bottom:18px">' + logo(38, 1) + '</div>' +
         '<div style="font-weight:300;font-size:21px;margin-bottom:10px">ابدأ بمستند</div>' +
         '<p style="color:var(--text2);font-size:12.5px;margin:0 auto 22px;line-height:2;font-weight:300;max-width:42ch">' +
-        'ارفع عقدًا أو لائحة أو إجراءات. نذير يحفظه، ويعيد حسابه كل يوم، ويخبرك بما سيستحق قبل أن يستحق.</p>' +
+        'ارفع عقدًا أو لائحة أو سياسة. نذير يحفظه، ويعيد حسابه كل يوم، ويخبرك بما سيستحق قبل أن يستحق.</p>' +
         '<div style="max-width:240px;margin:0 auto"><button class="btn" data-r="upload">تحليل مستند جديد</button></div></div>';
       wire(el); return;
     }
 
-    var pr = portfolioRisk();
-    var dl = allDeadlines(), over = allOverdue();
-    var soon = dl.filter(function (x) { return x.p.daysRemaining <= 30; });
-    var tasks = allTasks(), openTasks = tasks.filter(function (t) { return t.task.status !== 'done'; });
-
-    // ما تحرّك اليوم
+    var pr = portfolioRisk(), x = exec(), over = allOverdue();
     var moves = [];
     S.docs.forEach(function (d) {
       var dd = ST.delta(d);
@@ -1809,40 +2158,79 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     moves.sort(function (a, b) { return b.d.diff - a.d.diff; });
 
     var html = banner();
+
+    /* ١ — الحالة */
     html += '<div class="risk-hero"><div class="top">' +
-      '<div style="flex:1;min-width:190px">' +
-      '<div class="eyebrow">محفظة الامتثال · ' + S.docs.length + ' مستند</div>' +
-      '<div class="risk-title">خطرك اليوم<br><b>' + riskWord(pr) + '</b></div>' +
-      '<div class="risk-badges">' +
-        (over.length ? '<span class="badge high">' + over.length + ' موعد متجاوز</span>' : '') +
-        (soon.length ? '<span class="badge med">' + soon.length + ' يستحق خلال ٣٠ يومًا</span>' : '') +
-        (openTasks.length ? '<span class="badge info">' + openTasks.length + ' مهمة مفتوحة</span>' : '') +
-      '</div></div>' +
-      '<div style="text-align:center;min-width:118px">' +
+      '<div style="flex:1;min-width:180px">' +
+      '<div class="eyebrow">لوحة الامتثال · ' + S.docs.length + ' مستند · ' + ST.today() + '</div>' +
+      '<div class="risk-title">وضعك اليوم<br><b>' + riskWord(pr) + '</b></div>' +
+      (x.conflicts ? '<div class="risk-badges"><span class="badge high">' + x.conflicts +
+        ' بند يخالف المرجع</span></div>' : '') +
+      '</div>' +
+      '<div style="text-align:center;min-width:112px">' +
       '<div class="eyebrow">درجة الخطر</div>' +
       '<div class="risk-num num" style="color:' + riskColor(pr) + '">' + pr + '</div>' +
-      '<div style="font-size:9px;color:var(--text3);letter-spacing:.1em;margin-top:9px">حُدِّثت اليوم ' + ST.today() + '</div>' +
       '</div></div></div>';
 
-    html += '<div class="card"><div class="sectitle">ما يستحق قريبًا</div>';
-    if (over.length) {
-      html += over.slice(0, 3).map(function (x) {
-        return '<button class="linkrow" type="button" data-r="doc" data-id="' + x.doc.id + '">' +
-          '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">متجاوز</span>' +
-          '<span class="lr-body"><b>' + esc(x.g.title) + '</b><i>' + esc(x.doc.name) + '</i></span></button>';
-      }).join('');
-    }
-    html += soon.length ? soon.slice(0, 5).map(function (x) {
-      return '<button class="linkrow" type="button" data-r="doc" data-id="' + x.doc.id + '">' +
-        '<span class="lr-tag" style="color:' + sevColor(x.p.severity) + ';border-color:' + sevColor(x.p.severity) + '">' +
-        x.p.daysRemaining + ' يوم</span>' +
-        '<span class="lr-body"><b>' + esc(x.p.consequence.slice(0, 76)) + '</b><i>' + esc(x.doc.name) + '</i></span></button>';
-    }).join('') : (over.length ? '' : '<div class="empty">لا شيء يستحق خلال الثلاثين يومًا القادمة.</div>');
-    html += '</div>';
+    /* ٢ — أربعة أرقام تنفيذية */
+    html += '<div class="exec">' +
+      execCell(x.openGaps, 'مشكلة مفتوحة', x.totalGaps + ' إجمالًا', 'var(--warning)') +
+      execCell(x.doneGaps, 'مشكلة انحلّت', x.pctDone + '٪ من الكل', 'var(--success)') +
+      execCell(money(x.accruingSum + x.upcomingSum), 'ريال تعرّض مالي',
+        (x.accruingSum ? money(x.accruingSum) + ' جارية' : 'كلها محتملة'), 'var(--danger)') +
+      execCell(x.nextFine ? x.nextFine.o.daysRemaining : '—', 'يومًا لأقرب غرامة',
+        x.nextFine ? money(x.nextFine.o.exposure) + ' ريال' : 'لا غرامة مؤرّخة', 'var(--gold)') +
+      '</div>';
 
+    /* شريط الإنجاز */
+    html += '<div class="card"><div class="sectitle">أين وصلت المعالجة</div>' +
+      '<div class="progress"><div class="pf" style="width:' + x.pctDone + '%"></div></div>' +
+      '<div class="progress-lbl"><span>' + x.doneGaps + ' انحلّت</span>' +
+      '<span>' + x.openGaps + ' ما زالت مفتوحة</span></div></div>';
+
+    /* ٣ — متى تأتي الغرامات وكم تكون */
+    if (x.accruing.length || x.upcoming.length) {
+      html += '<div class="card"><div class="sectitle">الغرامات — متى وكم</div>';
+      if (x.accruing.length) {
+        html += '<div class="grouplbl" style="margin-top:0">جارية الآن</div>' +
+          x.accruing.slice(0, 4).map(function (f) {
+            return '<button class="linkrow" type="button" data-r="doc" data-id="' + f.doc.id + '">' +
+              '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">' +
+              money(f.o.exposure) + '</span><span class="lr-body">' +
+              '<b>متأخر ' + Math.abs(f.o.daysRemaining) + ' يومًا' +
+              (f.o.penaltyPerDay ? ' · ' + money(f.o.penaltyAmount) + ' ريال يوميًا' : '') + '</b>' +
+              '<i>' + esc(f.doc.name) + '</i></span></button>';
+          }).join('');
+      }
+      if (x.upcoming.length) {
+        html += '<div class="grouplbl">قادمة</div>' +
+          x.upcoming.slice(0, 5).map(function (f) {
+            return '<button class="linkrow" type="button" data-r="doc" data-id="' + f.doc.id + '">' +
+              '<span class="lr-tag" style="color:var(--warning);border-color:var(--warning)">' +
+              money(f.o.exposure) + '</span><span class="lr-body">' +
+              '<b>بعد ' + f.o.daysRemaining + ' يومًا · ' +
+              new Date(f.o.deadlineTS).toISOString().slice(0, 10) + '</b>' +
+              '<i>' + esc(f.doc.name) + '</i></span></button>';
+          }).join('');
+      }
+      html += '<div class="note">تقدير مستخرج من نصوص الجزاءات، لا التزام محاسبي. ' +
+        'الغرامة اليومية تُضرب في أيام التأخر.</div></div>';
+    }
+
+    /* ٤ — المتجاوز */
+    if (over.length) {
+      html += '<div class="card"><div class="sectitle">مواعيد انقضت</div>' +
+        over.slice(0, 4).map(function (o) {
+          return '<button class="linkrow" type="button" data-r="doc" data-id="' + o.doc.id + '">' +
+            '<span class="lr-tag" style="color:var(--danger);border-color:var(--danger)">متجاوز</span>' +
+            '<span class="lr-body"><b>' + esc(o.g.title) + '</b><i>' + esc(o.doc.name) + '</i></span></button>';
+        }).join('') + '</div>';
+    }
+
+    /* ٥ — ما تحرّك */
     if (moves.length) {
       html += '<div class="card"><div class="sectitle">ما تغيّر منذ آخر فتح</div>' +
-        moves.slice(0, 5).map(function (m) {
+        moves.slice(0, 4).map(function (m) {
           var up = m.d.diff > 0;
           return '<button class="linkrow" type="button" data-r="doc" data-id="' + m.doc.id + '">' +
             '<span class="lr-tag" style="color:' + (up ? 'var(--danger)' : 'var(--success)') + ';border-color:transparent">' +
@@ -1853,9 +2241,12 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         }).join('') + '</div>';
     }
 
-    html += '<div class="row-btns"><button class="btn" data-r="upload">تحليل مستند جديد</button>' +
-      '<button class="btn ghost" data-r="plan">خطة المعالجة</button></div>';
+    html += '<button class="btn ghost" data-r="upload" style="margin-top:4px">تحليل مستند جديد</button>';
     el.innerHTML = html; wire(el);
+  }
+  function execCell(v, l, s2, c) {
+    return '<div class="exec-cell"><div class="v num" style="color:' + c + '">' + v + '</div>' +
+      '<div class="l">' + l + '</div><div class="s">' + esc(s2) + '</div></div>';
   }
 
   /* ═══════════ ٢. المستندات ═══════════ */
@@ -1917,7 +2308,8 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   }
 
   /* ═══════════ ٣. صفحة المستند ═══════════ */
-  var TABS = [['sum', 'نظرة عامة'], ['gaps', 'الفجوات'], ['dl', 'المواعيد'], ['rep', 'التقرير']];
+  var TABS = [['sum', 'نظرة عامة'], ['gaps', 'الفجوات'], ['dl', 'المواعيد'],
+              ['fix', 'التعديلات'], ['rep', 'التقرير']];
   function renderDoc() {
     var el = $('pageContent'), doc = ST.get(S.openDoc);
     if (!doc) { go('docs'); return; }
@@ -1931,14 +2323,16 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       (doc.truncated ? 'اقتُطع النص عند ' + ST.MAX_TEXT.toLocaleString('en-US') + ' حرف · ' : '') +
       'حُدِّث اليوم ' + ST.today() + '</p>' +
       '<div class="filters">' + TABS.map(function (t) {
-        return '<button class="filter-btn' + (S.docTab === t[0] ? ' active' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>';
+        var n = t[0] === 'fix' ? (r.conflicts || []).length : 0;
+        return '<button class="filter-btn' + (S.docTab === t[0] ? ' active' : '') + '" data-tab="' + t[0] + '">' +
+          t[1] + (n ? ' <b style="color:var(--danger);font-weight:600">' + n + '</b>' : '') + '</button>';
       }).join('') + '</div><div id="tabBody"></div>';
     el.innerHTML = html; wire(el);
     var ts = el.querySelectorAll('[data-tab]');
     for (var i = 0; i < ts.length; i++) {
       (function (b) { b.addEventListener('click', function () { S.docTab = b.dataset.tab; renderDoc(); }); })(ts[i]);
     }
-    ({ sum: tabSum, gaps: tabGaps, dl: tabDeadlines, rep: tabReport })[S.docTab](doc, r);
+    ({ sum: tabSum, gaps: tabGaps, dl: tabDeadlines, fix: tabFix, rep: tabReport })[S.docTab](doc, r);
   }
 
   function tabSum(doc, r) {
@@ -2079,6 +2473,143 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         '<div class="pred-rec">' + esc(p.recommendation) + '</div></div></div>';
     }).join('');
     $('tabBody').innerHTML = html; wire($('tabBody'));
+  }
+
+  /* ═══ تبويب التعديلات: إصدار بند معدَّل وتعميم ═══ */
+  function tabFix(doc, r) {
+    var body = $('tabBody');
+    if (!doc.refText) {
+      body.innerHTML = '<div class="card"><div class="empty">' +
+        'كشف التعارض يحتاج مرجعًا تنظيميًا لمقارنة سياستك به.<br>الصق نص المرجع هنا ليُفحص المستند فورًا.</div>' +
+        '<textarea id="addRef" placeholder="الصق نص المرجع التنظيمي..." style="min-height:120px"></textarea>' +
+        '<button class="btn" id="saveRef" style="margin-top:12px">افحص التعارض</button></div>';
+      $('saveRef').addEventListener('click', function () {
+        var t = ($('addRef').value || '').trim();
+        if (!t) return;
+        ST.update(doc.id, { refText: t.slice(0, ST.MAX_TEXT) });
+        AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+                 title: 'إضافة مرجع تنظيمي', detail: doc.name });
+        refreshAll(); renderDoc();
+      });
+      return;
+    }
+    if (!r.conflicts.length) {
+      body.innerHTML = '<div class="card"><div class="empty">' +
+        'لم نجد بندًا في هذا المستند يفعل ما يمنعه المرجع.<br>' +
+        'يُرصد التعارض حين يمنع المرجعُ شيئًا وتفرضه سياستك في الموضوع نفسه.</div></div>';
+      return;
+    }
+
+    var v = doc.fixVars || {};
+    var f = function (id, label, val, ph) {
+      return '<div><label class="field-label" for="' + id + '">' + label + '</label>' +
+        '<input type="text" id="' + id + '" value="' + esc(val || '') + '" placeholder="' + ph + '"></div>';
+    };
+    var html = '<div class="warnbox">هذه مسودات قالبية تُولَّد من نصّي سياستك والمرجع. ' +
+      'راجعها قانونيًا وعدّلها قبل الاعتماد — نذير لا يصدر تعاميم، بل يجهّز مسودتها.</div>';
+
+    html += '<div class="card"><div class="sectitle">بيانات الإصدار</div><div class="fixgrid">' +
+      f('fxOrg', 'اسم الجهة', v.org, 'مثال: بنك الواحة') +
+      f('fxNum', 'رقم التعميم', v.number, '2026/14') +
+      f('fxEff', 'تاريخ النفاذ', v.effectiveDate, 'YYYY-MM-DD') +
+      f('fxOwner', 'الإدارة المختصة', v.owner, 'قطاع الخدمات المصرفية') +
+      f('fxRef', 'اسم المرجع', v.refName, 'تعليمات الرسوم') +
+      f('fxDays', 'مهلة التحديث (أيام)', v.days, '30') +
+      '</div></div>';
+
+    html += r.conflicts.map(function (c, i) {
+      var skipped = (v.skip || {})[c.code];
+      return '<div class="fixcard' + (skipped ? ' off' : '') + '">' +
+        '<div class="gap-head"><div><div class="gap-title">' + esc(c.core) + '</div>' +
+        '<div class="gap-meta"><span class="code">' + c.code + '</span>' +
+        '<span class="gap-type">تطابق الموضوع ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') + '</span></div></div>' +
+        '<label class="tick"><input type="checkbox" data-skip="' + c.code + '"' + (skipped ? '' : ' checked') + '> تضمين</label></div>' +
+        '<div class="fixside"><div class="fs-lbl">المرجع يمنع</div>' +
+        '<button type="button" class="evidence" data-q="' + esc(c.refQuote) + '" data-src="ref">' +
+        '<span class="lb">' + esc(c.refArticle || 'من المرجع') + '</span>«' + esc(c.refQuote) + '»</button></div>' +
+        '<div class="fixside"><div class="fs-lbl bad">سياستك تفرض</div>' +
+        '<button type="button" class="evidence" data-q="' + esc(c.docQuote) + '">' +
+        '<span class="lb">' + esc(c.docArticle || 'من سياستك') + '</span>«' + esc(c.docQuote) + '»</button></div>' +
+        '<div class="fixside"><div class="fs-lbl good">البند بعد التعديل — حرّره كما تشاء</div>' +
+        '<textarea class="fixprop" data-prop="' + c.code + '"' +
+        ((v.edits || {})[c.code] ? ' data-touched="1"' : '') + ' style="min-height:104px">' +
+        esc((v.edits || {})[c.code] || CF.proposeClause(c, v)) + '</textarea></div></div>';
+    }).join('');
+
+    html += '<div class="row-btns"><button class="btn" id="fxCirc">تنزيل التعميم</button>' +
+      '<button class="btn ghost" id="fxPol">تنزيل السياسة المعدّلة</button></div><div id="fxMsg"></div>';
+    body.innerHTML = html; wire(body);
+
+    /* لا نُعيد رسم الصفحة عند تغيير أي حقل: إعادة الرسم تُتلف الحقل الذي
+       انتقل إليه المستخدم للتو فيضيع ما كتبه. نحفظ بصمت فقط. */
+    var persist = function () {
+      var nv = fixVars(), edits = {}, skip = {};
+      var ta = body.querySelectorAll('[data-prop]');
+      for (var i = 0; i < ta.length; i++) {
+        if (ta[i].dataset.touched) edits[ta[i].dataset.prop] = ta[i].value;
+      }
+      var cb = body.querySelectorAll('[data-skip]');
+      for (var j = 0; j < cb.length; j++) if (!cb[j].checked) skip[cb[j].dataset.skip] = 1;
+      nv.edits = edits; nv.skip = skip;
+      ST.update(doc.id, { fixVars: nv });
+      return nv;
+    };
+    ['fxOrg', 'fxNum', 'fxEff', 'fxOwner', 'fxRef', 'fxDays'].forEach(function (id) {
+      $(id).addEventListener('change', persist);
+    });
+    var cbs = body.querySelectorAll('[data-skip]');
+    for (var k = 0; k < cbs.length; k++) {
+      (function (cb) {
+        cb.addEventListener('change', function () {
+          var card = cb.closest ? cb.closest('.fixcard') : null;
+          if (card) card.classList.toggle('off', !cb.checked);
+          persist();
+        });
+      })(cbs[k]);
+    }
+    var tas = body.querySelectorAll('[data-prop]');
+    for (var m = 0; m < tas.length; m++) {
+      (function (ta) {
+        ta.addEventListener('input', function () { ta.dataset.touched = '1'; });
+        ta.addEventListener('blur', persist);
+      })(tas[m]);
+    }
+
+    /* المسودة غير المحرَّرة تُعاد توليدها وقت التصدير بأحدث البيانات،
+       والمحرَّرة تبقى كما كتبها المستخدم. */
+    var chosen = function (nv) {
+      return r.conflicts.filter(function (c) { return !(nv.skip || {})[c.code]; })
+        .map(function (c) {
+          var cc = {}; Object.keys(c).forEach(function (k2) { cc[k2] = c[k2]; });
+          cc.editedProposal = (nv.edits || {})[c.code] || null;
+          return cc;
+        });
+    };
+    $('fxCirc').addEventListener('click', function () {
+      var nv = persist(), list = chosen(nv);
+      if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }
+      saveText('nadheer-تعميم-' + doc.caseCode + '.txt', CF.buildCircular(list, nv));
+      AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+               title: 'إصدار مسودة تعميم', detail: list.length + ' بندًا · ' + doc.name });
+      $('fxMsg').innerHTML = '<div class="okbox">نُزّلت مسودة التعميم — راجعها واعتمدها قبل الإصدار.</div>';
+    });
+    $('fxPol').addEventListener('click', function () {
+      var nv = persist(), list = chosen(nv);
+      if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }
+      var out = CF.buildAmendedPolicy(doc.text, list, nv);
+      saveText('nadheer-سياسة-معدلة-' + doc.caseCode + '.txt', out.text);
+      AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
+               title: 'إصدار مسودة سياسة معدّلة', detail: out.applied + ' بندًا عُدّل · ' + doc.name });
+      $('fxMsg').innerHTML = '<div class="okbox">نُزّلت السياسة بعد تعديل ' + out.applied + ' بندًا.</div>';
+    });
+
+    function fixVars() {
+      return { org: val('fxOrg', v.org), number: val('fxNum', v.number),
+               effectiveDate: val('fxEff', v.effectiveDate), owner: val('fxOwner', v.owner),
+               refName: val('fxRef', v.refName), days: val('fxDays', v.days),
+               docName: doc.name, edits: v.edits, skip: v.skip };
+    }
+    function val(id, dflt) { var e = $(id); return e ? (e.value || '').trim() : (dflt || ''); }
   }
 
   function tabReport(doc, r) {
