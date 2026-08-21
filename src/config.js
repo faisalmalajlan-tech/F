@@ -212,9 +212,41 @@
 
     /* معاملات الحساب */
     scoring: {
+      /* طريقة دمج الاحتمالية بالأثر:
+         'nist'     — مصفوفة NIST SP 800-30 Rev.1 (جدول I-2). الأثر يغلب:
+                      احتمالٌ عالٍ بأثرٍ ضئيل يبقى خطرًا منخفضًا، وأثرٌ
+                      كارثيٌّ باحتمالٍ متوسط يرتفع. وهي معتمدة وقابلة
+                      للدفاع أمام المدقق.
+         'multiply' — الضرب البسيط (الطريقة السابقة). يبقى خيارًا للمقارنة. */
+      model: 'nist',
+
+      /* NIST SP 800-30 Rev.1 — جدولا D-3 و I-3.
+         المدى الرقمي لكل مستوى، وقيمةٌ ممثِّلة تُستعمل درجةً للبند. */
+      nist: {
+        order: ['veryLow', 'low', 'moderate', 'high', 'veryHigh'],
+        levels: {
+          veryLow:  { label:'منخفض جدًا', min:0,  max:4,   mid:2  },
+          low:      { label:'منخفض',      min:5,  max:20,  mid:12 },
+          moderate: { label:'متوسط',      min:21, max:79,  mid:50 },
+          high:     { label:'مرتفع',      min:80, max:95,  mid:88 },
+          veryHigh: { label:'مرتفع جدًا', min:96, max:100, mid:98 }
+        },
+        /* جدول I-2: الصف احتمالية، والعمود أثرٌ بترتيب order.
+           انظر الصف الأول: احتمالية «مرتفعة جدًا» بأثرٍ «منخفض جدًا»
+           تبقى خطرًا «منخفضًا جدًا» — الأثر هو الذي يحكم. */
+        matrix: {
+          veryHigh: ['veryLow', 'low',     'moderate', 'high',     'veryHigh'],
+          high:     ['veryLow', 'low',     'moderate', 'high',     'veryHigh'],
+          moderate: ['veryLow', 'low',     'moderate', 'moderate', 'high'    ],
+          low:      ['veryLow', 'low',     'low',      'low',      'moderate'],
+          veryLow:  ['veryLow', 'veryLow', 'veryLow',  'veryLow',  'low'     ]
+        }
+      },
+
       probability: { overdue:0.95, d7:0.75, d30:0.55, d90:0.35, far:0.20, none:0.50 },
       decay:       { overdue:1.60, d7:1.45, d14:1.30, d30:1.15, d90:1.00, far:0.85 },
-      thresholds:  { critical:66, medium:33 },
+      /* عتبتا NIST: «مرتفع» يبدأ من ٨٠ و«متوسط» من ٢١ */
+      thresholds:  { critical:80, medium:21 },
       aggregate:   { maxWeight:0.6, rmsWeight:0.4 },
       coverageThreshold: 0.45,
       gapProbability: { missingClause:0.60, vague:0.55, uncovered:0.60, noDeadline:0.50 },

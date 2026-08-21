@@ -195,6 +195,38 @@ ok(th('المادة (13) تُراجع السياسة كل اثني عشر شهر
       'المادة الثالثة عشرة: تُراجع السياسة كل ستة أشهر.').length === 0,
    'الدورية تُقرأ ولو كان عددها مركّبًا («كل اثني عشر شهراً»)');
 
+console.log('\n— مقياس NIST SP 800-30 —');
+const nsc = NC.DEFAULTS.scoring;
+ok(nsc.model === 'nist', 'المقياس الافتراضي هو NIST');
+ok(nsc.thresholds.critical === 80 && nsc.thresholds.medium === 21,
+   'العتبتان ٨٠ و٢١ كما في جدول I-3');
+
+/* حدود المستويات الخمسة كما وردت في جدول D-3 حرفيًا */
+[[0,'veryLow'],[4,'veryLow'],[5,'low'],[20,'low'],[21,'moderate'],
+ [79,'moderate'],[80,'high'],[95,'high'],[96,'veryHigh'],[100,'veryHigh']]
+  .forEach(c => ok(E.nistBand(c[0]/100, nsc) === c[1],
+    'المدى ' + c[0] + ' → ' + nsc.nist.levels[c[1]].label));
+
+/* الأثر يغلب: هذا هو الفرق الجوهري عن الضرب */
+const lvl = (p,i,d) => E.nistRisk(p,i,d,nsc).level;
+ok(lvl(1.00, 0.02, null) === 'veryLow',
+   'احتمال مؤكَّد بأثرٍ منخفض جدًا يبقى خطرًا منخفضًا جدًا');
+ok(lvl(0.50, 1.00, null) === 'high',
+   'أثرٌ مرتفع جدًا باحتمالٍ متوسط يصعد إلى مرتفع');
+ok(lvl(0.10, 1.00, null) === 'moderate',
+   'وباحتمالٍ منخفض ينزل إلى متوسط ولا يسقط');
+
+/* الضرب يُذيب الأثر الكارثي كلما بعُد الموعد — والمصفوفة تأبى ذلك */
+const mulSc = NC.clone(NC.DEFAULTS).scoring; mulSc.model = 'multiply';
+const far = { p: 0.20, i: 1.00, d: 200 };
+ok(E.itemRisk(far.p, far.i, far.d, mulSc) < nsc.thresholds.medium + 5 &&
+   E.itemRisk(far.p, far.i, far.d, nsc) >= nsc.thresholds.medium,
+   'فسخُ عقدٍ بموعدٍ بعيد: الضرب يهبط به والمصفوفة تُبقيه ظاهرًا (' +
+   E.itemRisk(far.p, far.i, far.d, mulSc) + ' مقابل ' + E.itemRisk(far.p, far.i, far.d, nsc) + ')');
+
+/* الطريقة السابقة تبقى متاحة للمقارنة، ولا تتأثر بتبديل المقياس */
+ok(E.itemRisk(0.95, 0.85, -30, mulSc) === 100, 'طريقة الضرب باقية كما كانت');
+
 console.log('\n— قواعد ما بعد المقدار —');
 const byRule = (ref, doc, r) => cf(ref, doc).filter(c => c.rule === r);
 

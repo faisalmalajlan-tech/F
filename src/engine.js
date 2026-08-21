@@ -418,7 +418,35 @@
     return 'مراقبة';
   }
   var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
+  /* ── مستوى NIST من قيمةٍ بين صفر وواحد ──
+     المدى في جدول D-3: 0-4 منخفض جدًا · 5-20 منخفض · 21-79 متوسط ·
+     80-95 مرتفع · 96-100 مرتفع جدًا. */
+  function nistBand(v01, sc) {
+    var N = SC(sc).nist, pct = clamp(v01, 0, 1) * 100, i, id, L;
+    for (i = N.order.length - 1; i >= 0; i--) {
+      id = N.order[i]; L = N.levels[id];
+      if (pct >= L.min) return id;
+    }
+    return N.order[0];
+  }
+
+  /* ── درجة البند بمصفوفة NIST (جدول I-2) ──
+     الأثر هو الغالب: احتمالٌ مرتفع جدًا بأثرٍ منخفض جدًا يبقى «منخفضًا
+     جدًا»، وأثرٌ مرتفع جدًا باحتمالٍ متوسط يصعد إلى «مرتفع». هذا ما لا
+     يفعله الضرب — فهو يُذيب الأثر الكارثي كلما بعُد الموعد.
+     وعامل الزمن يُطوى داخل الاحتمالية لا يُضرب بعدها، لأن NIST يعرّف
+     الاحتمالية بأنها «احتمال وقوع الحدث وإفضائه إلى أثر» — فالزمن
+     جزءٌ منها لا بُعدٌ ثالث. */
+  function nistRisk(p, i, d, sc) {
+    var N = SC(sc).nist;
+    var L = nistBand(clamp(p * timeDecay(d, sc), 0, 1), sc);
+    var I = nistBand(i, sc);
+    var lvl = N.matrix[L][N.order.indexOf(I)];
+    return { level: lvl, score: N.levels[lvl].mid, likelihood: L, impact: I };
+  }
+
   function itemRisk(p, i, d, sc) {
+    if (SC(sc).model === 'nist') return nistRisk(p, i, d, sc).score;
     return Math.round(clamp(clamp(p, 0, 1) * clamp(i, 0, 1) * timeDecay(d, sc) * 100, 0, 100));
   }
   /* الدرجة الكلية: ٦٠٪ من أعلى بند + ٤٠٪ من الجذر التربيعي للمتوسط.
@@ -885,6 +913,7 @@
     NUM_WORDS: NUM_WORDS,
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
+    nistRisk: nistRisk, nistBand: nistBand,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
     makeCode: makeCode, shortHash: shortHash, compile: compile,
     stem: stem, contentWords: contentWords, normList: normList, hasAny: hasAny
