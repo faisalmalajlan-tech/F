@@ -1841,6 +1841,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   var esc = function (s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g,
     function (c) { return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); };
   var $ = function (i) { return document.getElementById(i); };
+  /* يربط حدثًا على كل ما يطابق المحدِّد داخل عنصر. يغني عن حلقة يدوية
+     وغلاف IIFE في كل موضع ربط — وكانت ثلاثة عشر. */
+  function on(root, sel, ev, fn) {
+    Array.prototype.forEach.call((root || document).querySelectorAll(sel), function (n) {
+      n.addEventListener(ev, function (e) { fn(n, e); });
+    });
+  }
   var sevColor = function (s) { return s === 'critical' ? 'var(--danger)' : s === 'medium' ? 'var(--warning)' : 'var(--success)'; };
   var sevLabel = function (s) { return s === 'critical' ? 'حرجة' : s === 'medium' ? 'متوسطة' : 'منخفضة'; };
   var sevBadge = function (s) { return s === 'critical' ? 'high' : s === 'medium' ? 'med' : 'low'; };
@@ -1913,10 +1920,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       '<div class="gate-note">' + ico('lock', 12) + ' هذا فصل أدوار للاستخدام، لا حاجز أمني. ' +
       'الملف يعمل من القرص بلا خادم، فمن يفتحه بمحرر نصوص يستطيع تجاوز الرمز. ' +
       'للحماية الفعلية شغّله من خادم داخلي بمصادقة.</div></div>';
-    var roles = $('gate').querySelectorAll('.role');
-    for (var i = 0; i < roles.length; i++) {
-      (function (b) { b.addEventListener('click', function () { gateRole = b.dataset.role; renderGate(); }); })(roles[i]);
-    }
+    on($('gate'), '.role', 'click', function (b) { gateRole = b.dataset.role; renderGate(); });
     $('gateFields').innerHTML = gateRole === 'admin'
       ? '<label class="field-label" for="gateCode">رمز المدير</label><input type="password" id="gateCode" autocomplete="off">' +
         (isDefaultCode() ? '<div style="font-size:10px;color:var(--warning);margin-top:8px;line-height:1.7">الرمز الافتراضي ما زال فعّالًا — غيّره من صفحة الأمان بعد الدخول.</div>' : '')
@@ -2084,10 +2088,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     });
     html += '<div class="navsep">الجلسة</div><button class="navlink" type="button" id="logoutBtn">تسجيل الخروج</button>';
     $('navPanel').innerHTML = html;
-    var ls = $('navPanel').querySelectorAll('.navlink[data-r]');
-    for (var i = 0; i < ls.length; i++) {
-      (function (l) { l.addEventListener('click', function () { go(l.dataset.r); }); })(ls[i]);
-    }
+    on($('navPanel'), '.navlink[data-r]', 'click', function (l) { go(l.dataset.r); });
     $('logoutBtn').addEventListener('click', logout);
   }
   function go(route, arg) {
@@ -2096,20 +2097,23 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     if (route === 'doc' && arg) { S.openDoc = arg; S.docTab = 'sum'; }
     S.route = route;
     $('navOverlay').classList.remove('open');
-    var links = $('navPanel').querySelectorAll('.navlink[data-r]');
-    for (var i = 0; i < links.length; i++) links[i].classList.toggle('active', links[i].dataset.r === route);
+    Array.prototype.forEach.call($('navPanel').querySelectorAll('.navlink[data-r]'), function (l) {
+      l.classList.toggle('active', l.dataset.r === route);
+    });
     window.scrollTo(0, 0);
     (routes[route] || renderHome)();
   }
+  /* ربط واحد لكل ما تنتجه الصفحات: التنقّل، الاقتباسات، وحالات المهام. */
   function wire(el) {
-    var bs = el.querySelectorAll('[data-r]');
-    for (var i = 0; i < bs.length; i++) {
-      (function (b) { b.addEventListener('click', function () { go(b.dataset.r, b.dataset.id); }); })(bs[i]);
-    }
-    var evs = el.querySelectorAll('.evidence');
-    for (var j = 0; j < evs.length; j++) {
-      (function (e) { e.addEventListener('click', function () { openViewer(e.dataset.q, e.dataset.src); }); })(evs[j]);
-    }
+    on(el, '[data-r]', 'click', function (b) { go(b.dataset.r, b.dataset.id); });
+    on(el, '.evidence', 'click', function (e) { openViewer(e.dataset.q, e.dataset.src); });
+    on(el, '[data-status]', 'click', function (b) {
+      ST.setTask(b.dataset.doc, b.dataset.code, { status: b.dataset.status, by: S.session.name });
+      AU.log({ kind: 'data', actor: S.session.name, code: b.dataset.code,
+               title: 'تحديث مهمة معالجة', detail: 'الحالة: ' + STATUS[b.dataset.status] });
+      refreshAll();
+      (S.route === 'plan' ? renderPlan : renderDoc)();
+    });
   }
   function banner() {
     if (!S.banner) return '';
@@ -2293,18 +2297,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     if (u.docs) html += '<div style="font-size:10px;color:var(--text3);text-align:center;margin-top:14px;line-height:1.9">' +
       u.docs + ' مستند · ' + u.mb.toFixed(2) + ' ميجابايت من مساحة المتصفح</div>';
     el.innerHTML = html; wire(el);
-    var dels = el.querySelectorAll('[data-del]');
-    for (var i = 0; i < dels.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          var d = ST.get(b.dataset.del);
-          if (!window.confirm('حذف «' + (d ? d.name : '') + '» ومهامه وتاريخ خطره؟')) return;
-          ST.remove(b.dataset.del);
-          AU.log({ kind: 'data', actor: S.session.name, title: 'حذف مستند', detail: d ? d.name : '' });
-          refreshAll(); S.banner = { msg: 'حُذف المستند.' }; renderDocs();
-        });
-      })(dels[i]);
-    }
+    on(el, '[data-del]', 'click', function (b) {
+      var d = ST.get(b.dataset.del);
+      if (!window.confirm('حذف «' + (d ? d.name : '') + '» ومهامه وتاريخ خطره؟')) return;
+      ST.remove(b.dataset.del);
+      AU.log({ kind: 'data', actor: S.session.name, title: 'حذف مستند', detail: d ? d.name : '' });
+      refreshAll(); S.banner = { msg: 'حُذف المستند.' }; renderDocs();
+    });
   }
 
   /* ═══════════ ٣. صفحة المستند ═══════════ */
@@ -2328,10 +2327,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
           t[1] + (n ? ' <b style="color:var(--danger);font-weight:600">' + n + '</b>' : '') + '</button>';
       }).join('') + '</div><div id="tabBody"></div>';
     el.innerHTML = html; wire(el);
-    var ts = el.querySelectorAll('[data-tab]');
-    for (var i = 0; i < ts.length; i++) {
-      (function (b) { b.addEventListener('click', function () { S.docTab = b.dataset.tab; renderDoc(); }); })(ts[i]);
-    }
+    on(el, '[data-tab]', 'click', function (b) { S.docTab = b.dataset.tab; renderDoc(); });
     ({ sum: tabSum, gaps: tabGaps, dl: tabDeadlines, fix: tabFix, rep: tabReport })[S.docTab](doc, r);
   }
 
@@ -2405,20 +2401,6 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         'data-doc="' + docId + '" data-code="' + code + '" data-status="' + k + '">' + STATUS[k] + '</button>';
     }).join('') + '</div>';
   }
-  function wireStatus(el) {
-    var bs = el.querySelectorAll('[data-status]');
-    for (var i = 0; i < bs.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          ST.setTask(b.dataset.doc, b.dataset.code, { status: b.dataset.status, by: S.session.name });
-          AU.log({ kind: 'data', actor: S.session.name, code: b.dataset.code,
-                   title: 'تحديث مهمة معالجة', detail: 'الحالة: ' + STATUS[b.dataset.status] });
-          refreshAll();
-          (S.route === 'plan' ? renderPlan : renderDoc)();
-        });
-      })(bs[i]);
-    }
-  }
   function tabGaps(doc, r) {
     var st = r.stats;
     var html = '<div class="filters" id="gf">' +
@@ -2433,17 +2415,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       var box = $('gl');
       box.innerHTML = list.length ? list.map(function (g) { return gapCard(doc, g); }).join('')
                                   : '<div class="empty">لا شيء في هذا التصنيف.</div>';
-      wire(box); wireStatus(box);
+      wire(box);
     };
-    var btns = $('gf').querySelectorAll('.filter-btn');
-    for (var i = 0; i < btns.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          for (var j = 0; j < btns.length; j++) btns[j].classList.remove('active');
-          b.classList.add('active'); S.gapFilter = b.dataset.f; draw();
-        });
-      })(btns[i]);
-    }
+    on($('gf'), '.filter-btn', 'click', function (b) {
+      Array.prototype.forEach.call($('gf').querySelectorAll('.filter-btn'),
+        function (o) { o.classList.remove('active'); });
+      b.classList.add('active'); S.gapFilter = b.dataset.f; draw();
+    });
     S.gapFilter = 'all'; draw();
   }
   function fbtn(f, label, n) {
@@ -2557,23 +2535,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     ['fxOrg', 'fxNum', 'fxEff', 'fxOwner', 'fxRef', 'fxDays'].forEach(function (id) {
       $(id).addEventListener('change', persist);
     });
-    var cbs = body.querySelectorAll('[data-skip]');
-    for (var k = 0; k < cbs.length; k++) {
-      (function (cb) {
-        cb.addEventListener('change', function () {
-          var card = cb.closest ? cb.closest('.fixcard') : null;
-          if (card) card.classList.toggle('off', !cb.checked);
-          persist();
-        });
-      })(cbs[k]);
-    }
-    var tas = body.querySelectorAll('[data-prop]');
-    for (var m = 0; m < tas.length; m++) {
-      (function (ta) {
-        ta.addEventListener('input', function () { ta.dataset.touched = '1'; });
-        ta.addEventListener('blur', persist);
-      })(tas[m]);
-    }
+    on(body, '[data-skip]', 'change', function (cb) {
+      var card = cb.closest ? cb.closest('.fixcard') : null;
+      if (card) card.classList.toggle('off', !cb.checked);
+      persist();
+    });
+    on(body, '[data-prop]', 'input', function (ta) { ta.dataset.touched = '1'; });
+    on(body, '[data-prop]', 'blur', persist);
 
     /* المسودة غير المحرَّرة تُعاد توليدها وقت التصدير بأحدث البيانات،
        والمحرَّرة تبقى كما كتبها المستخدم. */
@@ -2701,11 +2669,8 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     }).join('');
 
     html += '<div class="row-btns"><button class="btn ghost" id="planExport">تنزيل الخطة</button></div>';
-    el.innerHTML = html; wire(el); wireStatus(el);
-    var fs = el.querySelectorAll('[data-pf]');
-    for (var i = 0; i < fs.length; i++) {
-      (function (b) { b.addEventListener('click', function () { S.planFilter = b.dataset.pf; renderPlan(); }); })(fs[i]);
-    }
+    el.innerHTML = html; wire(el);
+    on(el, '[data-pf]', 'click', function (b) { S.planFilter = b.dataset.pf; renderPlan(); });
     $('planExport').addEventListener('click', function () { downloadPlan(tasks); });
   }
 
@@ -2987,21 +2952,18 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   }
   function bindAdmin(el) {
     var c = draft(), redraw = function () { renderAdmin(); };
-    var on = function (sel, ev, fn) {
-      var ns = el.querySelectorAll(sel);
-      for (var i = 0; i < ns.length; i++) (function (n) { n.addEventListener(ev, function () { fn(n); }); })(ns[i]);
-    };
-    on('[data-deldeontic]', 'click', function (n) { c.deontic.splice(+n.dataset.deldeontic, 1); redraw(); });
-    on('[data-delparty]', 'click', function (n) { c.parties.splice(+n.dataset.delparty, 1); redraw(); });
-    on('[data-delvague]', 'click', function (n) { c.vague.splice(+n.dataset.delvague, 1); redraw(); });
-    on('[data-delclause]', 'click', function (n) { c.clauses.splice(+n.dataset.delclause, 1); redraw(); });
+    var bindAll = function (sel, ev, fn) { on(el, sel, ev, fn); };
+    bindAll('[data-deldeontic]', 'click', function (n) { c.deontic.splice(+n.dataset.deldeontic, 1); redraw(); });
+    bindAll('[data-delparty]', 'click', function (n) { c.parties.splice(+n.dataset.delparty, 1); redraw(); });
+    bindAll('[data-delvague]', 'click', function (n) { c.vague.splice(+n.dataset.delvague, 1); redraw(); });
+    bindAll('[data-delclause]', 'click', function (n) { c.clauses.splice(+n.dataset.delclause, 1); redraw(); });
     c.penaltyTiers.forEach(function (t, i) {
-      on('[data-delterm' + i + ']', 'click', function (n) { t.terms.splice(+n.getAttribute('data-delterm' + i), 1); redraw(); });
+      bindAll('[data-delterm' + i + ']', 'click', function (n) { t.terms.splice(+n.getAttribute('data-delterm' + i), 1); redraw(); });
     });
     c.clauses.forEach(function (cl, i) {
-      on('[data-delcterm' + i + ']', 'click', function (n) { cl.terms.splice(+n.getAttribute('data-delcterm' + i), 1); redraw(); });
+      bindAll('[data-delcterm' + i + ']', 'click', function (n) { cl.terms.splice(+n.getAttribute('data-delcterm' + i), 1); redraw(); });
     });
-    on('[data-add]', 'click', function (n) {
+    bindAll('[data-add]', 'click', function (n) {
       var id = n.dataset.add, v = ($(id).value || '').trim();
       if (!v) return;
       if (id === 'addDeontic') c.deontic.push(v);
@@ -3012,16 +2974,16 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       else if (id.indexOf('addClause') === 0) c.clauses[+id.slice(9)].terms.push(v);
       redraw();
     });
-    on('[data-tier]', 'change', function (n) {
+    bindAll('[data-tier]', 'change', function (n) {
       var t = c.penaltyTiers[+n.dataset.tier]; t[n.dataset.f] = n.dataset.f === 'impact' ? +n.value : n.value;
     });
-    on('[data-clause]', 'change', function (n) {
+    bindAll('[data-clause]', 'change', function (n) {
       var cl = c.clauses[+n.dataset.clause]; cl[n.dataset.f] = n.dataset.f === 'impact' ? +n.value : n.value;
     });
-    on('[data-vague]', 'change', function (n) { c.vague[+n.dataset.vague][n.dataset.f] = n.value; });
-    on('[data-rem]', 'change', function (n) { c.remediation[n.dataset.rem][n.dataset.f] = n.value; });
-    on('[data-scalar]', 'change', function (n) { c[n.dataset.scalar] = +n.value; });
-    on('[data-sc]', 'change', function (n) {
+    bindAll('[data-vague]', 'change', function (n) { c.vague[+n.dataset.vague][n.dataset.f] = n.value; });
+    bindAll('[data-rem]', 'change', function (n) { c.remediation[n.dataset.rem][n.dataset.f] = n.value; });
+    bindAll('[data-scalar]', 'change', function (n) { c[n.dataset.scalar] = +n.value; });
+    bindAll('[data-sc]', 'change', function (n) {
       if (n.dataset.sc === 'root') c.scoring[n.dataset.k] = +n.value;
       else c.scoring[n.dataset.sc][n.dataset.k] = +n.value;
     });
@@ -3088,10 +3050,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     html += '<div class="row-btns"><button class="btn ghost" id="auExport">تصدير السجل</button>' +
       '<button class="btn danger" id="auClear">مسح السجل</button></div>';
     el.innerHTML = html;
-    var fs = el.querySelectorAll('[data-af]');
-    for (var i = 0; i < fs.length; i++) {
-      (function (b) { b.addEventListener('click', function () { S.auditFilter = b.dataset.af; renderAudit(); }); })(fs[i]);
-    }
+    on(el, '[data-af]', 'click', function (b) { S.auditFilter = b.dataset.af; renderAudit(); });
     var q = $('auditQ');
     q.addEventListener('input', function () {
       S.auditQ = this.value; var pos = this.selectionStart; renderAudit();
