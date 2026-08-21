@@ -7,6 +7,7 @@
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
             draft: { doc1: '', doc2: '', ctx: '', name: '', type: 'فحص كل البنود' }, files: {},
+            batch: [],   // عدة مستندات تُحلَّل دفعةً واحدة مقابل مرجعٍ واحد
             gapFilter: 'all', planFilter: 'open', auditFilter: 'all', auditQ: '',
             storageOK: true, sourceText: '', banner: null };
 
@@ -796,7 +797,12 @@
     S.sourceText = doc.text; S.refText = doc.refText || '';
 
     var html = banner() +
-      '<button class="backlink" type="button" data-r="docs">' + ico('back', 13) + ' كل المستندات</button>' +
+      /* بعد التحليل تنتهي الصفحة هنا، وكان الطريق إلى مستندٍ آخر يمرّ
+         بقائمة الشريط وحدها — فيبدو أن النظام لا يقبل غير ملفٍ واحد. */
+      '<div class="doc-top"><button class="backlink" type="button" data-r="docs">' +
+      ico('back', 13) + ' كل المستندات</button>' +
+      '<button class="btn ghost sm" type="button" data-r="upload">' + ico('plus', 13) +
+      ' تحليل مستند آخر</button></div>' +
       '<h2 class="pagetitle">' + esc(doc.name) + '</h2>' +
       '<p class="pagesub"><span class="code">' + esc(doc.caseCode) + '</span> &nbsp; ' +
       (doc.truncated ? 'اقتُطع النص عند ' + ST.MAX_TEXT.toLocaleString('en-US') + ' حرف · ' : '') +
@@ -1309,11 +1315,14 @@
       }).join('') + '</select>' +
       '<div class="doclabel" style="margin-top:18px">المستند — مطلوب</div>' +
       '<button type="button" class="drop" id="drop_doc1"><div class="ic">' + ico('doc', 22) + '</div>' +
-      '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
-      '<input type="file" id="fi_doc1" accept=".pdf,.txt,.md" style="display:none"><div id="info_doc1"></div>' +
+      '<div class="mt">اسحب الملفات أو اضغط للاختيار</div>' +
+      '<div class="ht">PDF · TXT — يمكن اختيار عدة ملفات دفعة واحدة</div></button>' +
+      '<input type="file" id="fi_doc1" accept=".pdf,.txt,.md" multiple style="display:none"><div id="info_doc1"></div>' +
       '<textarea id="paste_doc1" placeholder="أو الصق النص مباشرة..."></textarea>' +
       '<hr class="hair">' +
       '<div class="doclabel">المرجع التنظيمي — اختياري</div>' +
+      '<div class="ht" style="margin-bottom:10px;color:var(--text3);font-size:10px">' +
+      'يُقارَن به كل مستند من الملفات أعلاه.</div>' +
       '<button type="button" class="drop" id="drop_doc2"><div class="ic">' + ico('docs', 22) + '</div>' +
       '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
       '<input type="file" id="fi_doc2" accept=".pdf,.txt,.md" style="display:none"><div id="info_doc2"></div>' +
@@ -1324,16 +1333,17 @@
     ['doc1', 'doc2'].forEach(function (key) {
       var drop = $('drop_' + key), input = $('fi_' + key), pasteEl = $('paste_' + key);
       drop.addEventListener('click', function () { input.click(); });
-      input.addEventListener('change', function () { if (this.files[0]) handleFile(this.files[0], key); });
+      input.addEventListener('change', function () { takeFiles(this.files, key); });
       drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('drag'); });
       drop.addEventListener('dragleave', function () { drop.classList.remove('drag'); });
       drop.addEventListener('drop', function (e) {
         e.preventDefault(); drop.classList.remove('drag');
-        if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], key);
+        takeFiles(e.dataTransfer.files, key);
       });
       pasteEl.value = S.draft[key] || '';
       pasteEl.addEventListener('input', function () { S.draft[key] = this.value; });
-      if (S.files[key]) showFile(key, S.files[key].name, S.files[key].text.length);
+      if (key === 'doc1' && S.batch.length) showBatch();
+      else if (S.files[key]) showFile(key, S.files[key].name, S.files[key].text.length);
     });
     $('docName').value = S.draft.name || '';
     $('docName').addEventListener('input', function () { S.draft.name = this.value; });
@@ -1347,6 +1357,56 @@
     info.querySelector('button').addEventListener('click', function () { delete S.files[key]; info.innerHTML = ''; });
     if (key === 'doc1' && !$('docName').value) { $('docName').value = name.replace(/\.[^.]+$/, ''); S.draft.name = $('docName').value; }
   }
+  /* ── الدفعة ──
+     الحالة الشائعة أن تُقارن عدة سياسات بمرجعٍ واحد. كان لا بد من رفعها
+     واحدةً واحدة، وبعد كل تحليل تنتقل الصفحة إلى المستند فيضيع الطريق
+     إلى التالي — فيبدو أن النظام «لا يحفظ أكثر من ملف». */
+  function takeFiles(fileList, key) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    if (key === 'doc2') { handleFile(files[0], key); return; }   // المرجع واحد دائمًا
+    if (files.length === 1 && !S.batch.length) { handleFile(files[0], key); return; }
+
+    var info = $('info_doc1');
+    info.innerHTML = '<div class="fileinfo"><span>جارٍ قراءة ' + files.length + ' ملفات…</span></div>';
+    Promise.all(files.map(function (f) {
+      return readFileText(f).then(
+        function (t) { return { name: f.name, text: t, ok: true }; },
+        function (e) { return { name: f.name, err: e.message || 'تعذّرت القراءة', ok: false }; });
+    })).then(function (all) {
+      all.forEach(function (r) { if (r.ok) S.batch.push({ name: r.name, text: r.text }); });
+      var bad = all.filter(function (r) { return !r.ok; });
+      showBatch();
+      if (bad.length) showError('تعذّرت قراءة: ' + bad.map(function (b) { return b.name; }).join('، '));
+    });
+  }
+
+  function showBatch() {
+    var info = $('info_doc1');
+    if (!S.batch.length) { info.innerHTML = ''; return; }
+    info.innerHTML = '<div class="batchlist"><div class="bl-head">' + S.batch.length +
+      ' مستندات ستُحلَّل دفعةً واحدة</div>' +
+      S.batch.map(function (b, i) {
+        return '<div class="bl-row"><span class="bl-n">' + (i + 1) + '</span>' +
+          '<span class="bl-name">' + esc(b.name) + '</span>' +
+          '<span class="bl-len">' + b.text.length.toLocaleString('en-US') + ' حرف</span>' +
+          '<button type="button" class="bl-x" data-bi="' + i + '">×</button></div>';
+      }).join('') +
+      '<button type="button" class="bl-clear">إزالة الكل</button></div>';
+    on(info, '.bl-x', 'click', function (b) { S.batch.splice(+b.dataset.bi, 1); showBatch(); });
+    on(info, '.bl-clear', 'click', function () { S.batch = []; showBatch(); });
+    var nm = $('docName');
+    if (nm && !nm.value) nm.placeholder = 'يُؤخذ اسم كل ملف تلقائيًا';
+  }
+
+  function readFileText(file) {
+    var isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    return (isPdf ? extractPdf(file) : file.text()).then(function (text) {
+      if (!text || !text.trim()) throw new Error('لا نصّ قابل للاستخراج (غالبًا صورة ممسوحة)');
+      return text;
+    });
+  }
+
   function handleFile(file, key) {
     var info = $('info_' + key);
     info.innerHTML = '<div class="fileinfo"><span>جارٍ قراءة: ' + esc(file.name) + '</span></div>';
@@ -1374,12 +1434,68 @@
   }
   function showError(m) { var el = $('errArea'); if (el) el.innerHTML = '<div class="errbox">' + esc(m) + '</div>'; }
 
+  /* يحلّل كل ملفات الدفعة مقابل المرجع نفسه، ويحفظ كلًّا منها باسم ملفه.
+     ما يفشل منها يُسمّى في التقرير ولا يُسقط البقية. */
+  function runBatch(refText) {
+    var docType = $('docType').value, items = S.batch.slice();
+    $('procLogo').innerHTML = logo(34, 1.1);
+    $('proc').classList.add('active');
+    $('procSteps').innerHTML = items.map(function (b, i) {
+      return '<div class="proc-step" id="bs_' + i + '"><div class="dot">' + (i + 1) + '</div>' +
+             esc(b.name) + '<span class="out" id="bo_' + i + '"></span></div>';
+    }).join('');
+
+    var okCount = 0, failed = [], firstId = null, i = 0;
+    (function step() {
+      if (i >= items.length) {
+        setTimeout(function () {
+          $('proc').classList.remove('active');
+          S.batch = []; S.files = {};
+          S.draft = { doc1: '', doc2: '', ctx: '', name: '', type: docType };
+          refreshAll();
+          S.banner = failed.length
+            ? { bad: true, msg: 'حُلِّل ' + okCount + ' من ' + items.length +
+                '. تعذّر: ' + failed.join('، ') }
+            : { bad: false, msg: 'حُلِّلت ' + okCount + ' مستندات وحُفظت. المرجع نفسه طُبِّق عليها كلها.' };
+          go('docs');
+        }, 300);
+        return;
+      }
+      var b = items[i], st = $('bs_' + i), out = $('bo_' + i);
+      try {
+        var res = E.analyze({ docText: b.text, refText: refText, config: S.cfg, docType: docType });
+        var code = AU.nextCode('NR');
+        var nm = b.name.replace(/\.[^.]+$/, '');
+        var saved = ST.add({ name: nm, text: b.text, refText: refText, docType: docType,
+                             refName: S.files.doc2 ? S.files.doc2.name : '',
+                             caseCode: code, fp: res.fingerprint });
+        AU.log({ kind: 'analysis', actor: S.session.name, code: code, title: 'تحليل مستند: ' + nm,
+          detail: res.counts.chars.toLocaleString('en-US') + ' حرف · ' + res.obligations.length +
+                  ' التزام · ' + res.gaps.length + ' فجوة · درجة الخطر ' + res.riskScore,
+          meta: { fp: res.fingerprint, risk: res.riskScore,
+                  codes: res.gaps.map(function (g) { return g.code; }) } });
+        if (!firstId) firstId = saved.doc.id;
+        okCount++;
+        st.classList.add('done'); st.querySelector('.dot').textContent = '✓';
+        out.textContent = (res.conflicts ? '' : '') + res.gaps.length + ' فجوة · خطر ' + res.riskScore +
+                          (saved.saved ? '' : ' · لم يُحفظ');
+      } catch (e) {
+        failed.push(b.name);
+        st.querySelector('.dot').textContent = '×';
+        out.textContent = 'تعذّر: ' + (e.message || '').slice(0, 40);
+      }
+      i++; setTimeout(step, 160);
+    })();
+  }
+
   var STEPS = ['قراءة النص وتطبيعه', 'استخراج التواريخ والمدد', 'رصد الالتزامات والجزاءات',
                'فحص البنود المعيارية', 'حساب الخطر وحفظ المستند'];
   function runAnalysis() {
     var err = $('errArea'); if (err) err.innerHTML = '';
-    var t1 = ((S.files.doc1 ? S.files.doc1.text : '') + '\n\n' + (S.draft.doc1 || '')).trim();
     var t2 = ((S.files.doc2 ? S.files.doc2.text : '') + '\n\n' + (S.draft.doc2 || '')).trim();
+    // دفعةٌ من الملفات؟ كلها تُقارن بالمرجع نفسه
+    if (S.batch.length) { runBatch(t2); return; }
+    var t1 = ((S.files.doc1 ? S.files.doc1.text : '') + '\n\n' + (S.draft.doc1 || '')).trim();
     if (!t1) { showError('أضف المستند أولًا — ارفع ملفًا أو الصق النص.'); return; }
     var name = ($('docName').value || '').trim() ||
                (S.files.doc1 ? S.files.doc1.name.replace(/\.[^.]+$/, '') : 'مستند ' + ST.today());

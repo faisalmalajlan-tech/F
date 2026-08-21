@@ -267,12 +267,73 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   bs = await bdState();
   ok(bs.on && !bs.paused, 'وتعود بالرجوع إلى الرئيسية');
 
+  console.log('\n— رفع دفعة من الملفات —');
+  /* الحالة الشائعة: عدة سياسات مقابل مرجع واحد. كان لا بد من رفعها
+     واحدةً واحدة، وبعد كل تحليل تنتقل الصفحة فيضيع الطريق إلى التالي. */
+  await nav('docs');
+  await page.click('#pageContent [data-r="upload"]'); await page.waitForTimeout(320);
+  ok(await page.evaluate(() => document.getElementById('fi_doc1').multiple),
+     'حقل المستند يقبل عدة ملفات');
+  /* setInputFiles لا يُرفق ملفات في صفحة file://، فنبني FileList داخل
+     الصفحة كما يفعل المتصفح عند الاختيار الحقيقي. */
+  const putFiles = (sel, items) => page.evaluate(({ sel, items }) => {
+    const dt = new DataTransfer();
+    items.forEach(it => dt.items.add(new File([it.text], it.name, { type: 'text/plain' })));
+    const el = document.querySelector(sel);
+    el.files = dt.files;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { sel, items });
+
+  const before = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return 0; }
+  });
+  await putFiles('#fi_doc1', [
+    { name: 'سياسة ألف.txt', text: PROC },
+    { name: 'سياسة باء.txt', text: FEEPOL },
+    { name: 'سياسة جيم.txt', text: PROC.replace('2026/01/15', '2026/05/15') }
+  ]);
+  await page.waitForTimeout(700);
+  ok((await page.locator('.bl-row').count()) === 3, 'ثلاثة ملفات معروضة في قائمة الدفعة');
+  await putFiles('#fi_doc2', [{ name: 'المرجع.txt', text: POL }]);
+  await page.waitForTimeout(400);
+  /* إزالة ملف من القائمة قبل التحليل */
+  await page.click('.bl-x'); await page.waitForTimeout(250);
+  ok((await page.locator('.bl-row').count()) === 2, 'إزالة ملف من الدفعة تعمل');
+  await putFiles('#fi_doc1', [{ name: 'سياسة دال.txt', text: FEEPOL }]);
+  await page.waitForTimeout(500);
+  ok((await page.locator('.bl-row').count()) === 3, 'وإضافة ملف إلى دفعة قائمة تعمل');
+
+  await page.click('#analyzeBtn'); await page.waitForTimeout(4200);
+  const after = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return 0; }
+  });
+  ok(after === before + 3, 'حُفظت الثلاثة دفعةً واحدة: ' + before + ' → ' + after);
+  ok((await page.locator('#pageContent').textContent()).indexOf('حُلِّلت') > -1,
+     'ورسالة تؤكد عدد ما حُلِّل');
+  /* كل مستند أخذ اسم ملفه */
+  const names = await page.locator('.doc-card .doc-name, .doc-card').allTextContents();
+  ok(names.join(' ').indexOf('سياسة باء') > -1, 'كل مستند حمل اسم ملفه');
+  /* والمرجع نفسه طُبِّق على الكل */
+  const allHaveRef = await page.evaluate(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]');
+      return all.slice(-3).every(d => (d.refText || '').length > 20);
+    } catch (e) { return false; }
+  });
+  ok(allHaveRef, 'والمرجع نفسه حُفظ مع كل واحد منها');
+
+  console.log('\n— الطريق إلى مستند آخر —');
+  await page.click('.doc-main'); await page.waitForTimeout(420);
+  ok((await page.locator('.doc-top [data-r="upload"]').count()) === 1,
+     'صفحة المستند فيها زر «تحليل مستند آخر»');
+
   console.log('\n— مستند ثالث والمحفظة —');
   await nav('docs'); await addDoc('عقد تشغيل', PROC.replace('2026/01/15', '2026/03/20'));
   await nav('home');
-  ok((await page.locator('#pageContent').textContent()).indexOf('4 مستند') > -1, 'الرئيسية تجمع كل المستندات');
+  /* ٤ أصلية + ٣ من اختبار الدفعة */
+  ok((await page.locator('#pageContent').textContent()).indexOf('7 مستند') > -1, 'الرئيسية تجمع كل المستندات');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 4, 'أربعة مستندات محفوظة (منها نسخة معدّلة)');
+  ok((await page.locator('.doc-card').count()) === 7, 'سبعة مستندات محفوظة (منها نسخة معدّلة وثلاثة من دفعة)');
 
   console.log('\n— المدير —');
   await page.click('#burgerBtn'); await page.waitForTimeout(140);
@@ -281,7 +342,7 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok((await page.locator('#userRole').textContent()) === 'مدير النظام', 'دخول المدير');
   ok((await navCount()) === 6, 'المدير يرى ٦ صفحات');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 4, 'المستندات باقية بعد تبديل المستخدم');
+  ok((await page.locator('.doc-card').count()) === 7, 'المستندات باقية بعد تبديل المستخدم');
   await nav('admin');
   await page.fill('#addDeontic', 'تختص'); await page.click('[data-add="addDeontic"]'); await page.waitForTimeout(300);
   await page.click('#cfgSave'); await page.waitForTimeout(500);
