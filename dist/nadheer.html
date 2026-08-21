@@ -197,9 +197,15 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
 .gap-title{font-size:14.5px;font-weight:400;line-height:1.55}
 .gap-meta{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
 .gap-type{font-size:10px;color:var(--text3);letter-spacing:.06em}
+.gap-type-tag{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--text3);letter-spacing:.06em;padding:4px 8px;border:1px solid rgba(136,126,215,.2);border-radius:2px;cursor:help;background:rgba(136,126,215,.03);transition:.15s}
+.gap-type-tag:hover{border-color:var(--gold);color:var(--gold);background:rgba(216,190,134,.08)}
+.gap-type-tag svg{opacity:.6}
 .gap-desc{font-size:12px;line-height:1.9;color:var(--text2);margin-top:11px;font-weight:300}
-.gap-rec{margin-top:11px;padding:11px 13px;border-right:1px solid var(--gold);background:var(--goldFaint);
-  font-size:11.5px;color:var(--gold2);line-height:1.8;font-weight:300}
+.gap-rec{margin-top:11px;padding:13px 13px;border-right:1px solid var(--gold);background:var(--goldFaint);
+  font-size:11.5px;color:var(--gold2);line-height:1.8;font-weight:300;display:flex;gap:10px;align-items:flex-start}
+.gap-rec svg{flex-shrink:0;margin-top:2px;opacity:.7}
+.gap-rec > div{flex:1}
+.rec-label{font-size:9px;font-weight:600;letter-spacing:.06em;color:var(--gold);margin-bottom:4px}
 
 .evidence{margin-top:11px;border:1px solid var(--line);border-right:2px solid var(--line2);background:rgba(4,5,13,.42);
   padding:11px 13px;font-size:11.5px;color:var(--text2);line-height:1.9;cursor:pointer;width:100%;text-align:right;
@@ -234,6 +240,14 @@ textarea:focus,input:focus,select:focus{border-color:var(--line2);outline:none}
 .tl-mark{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
 .tl-mark span{position:absolute;top:6px;right:5px;font-size:8.5px;color:var(--text3);white-space:nowrap;letter-spacing:.06em}
 .tl-dot{position:absolute;bottom:14px;width:7px;height:7px;border-radius:50%;transform:translateX(50%)}
+
+.gap-legend{background:var(--goldFaint);border:1px solid rgba(216,190,134,.2);border-radius:3px;padding:14px 16px;margin-bottom:18px}
+.legend-title{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--gold);margin-bottom:10px}
+.legend-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.legend-item{display:flex;gap:10px;align-items:flex-start;font-size:11px;color:var(--text2)}
+.legend-tag{display:inline-flex;align-items:center;gap:4px;font-weight:500;color:var(--gold2);flex-shrink:0}
+.legend-tag svg{opacity:.6}
+.legend-desc{font-size:10px;color:var(--text3);font-weight:300}
 
 .filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
 .filter-btn{background:transparent;border:1px solid var(--line);color:var(--text2);padding:7px 14px;border-radius:2px;
@@ -600,6 +614,12 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       { term:'بصورة منتظمة',        why:'لا يحدد دورية محددة' },
       { term:'من وقت لآخر',         why:'يترك التوقيت مفتوحًا بلا سقف' },
       { term:'حسب الحاجة',          why:'يترك التقدير لطرف واحد بلا معيار' },
+      { term:'عند الحاجة',           why:'يترك التقدير لطرف واحد بلا معيار' },
+      { term:'متى رأت',              why:'سلطة تقديرية مطلقة بلا ضابط' },
+      { term:'متى رأى',              why:'سلطة تقديرية مطلقة بلا ضابط' },
+      { term:'حسب ما تراه',          why:'سلطة تقديرية مطلقة بلا ضابط' },
+      { term:'وفق ما تراه',          why:'سلطة تقديرية مطلقة بلا ضابط' },
+      { term:'بحسب تقدير',           why:'سلطة تقديرية مطلقة بلا ضابط' },
       { term:'عند الاقتضاء',        why:'يترك التقدير لطرف واحد بلا معيار' },
       { term:'حسب ما يراه مناسباً', why:'سلطة تقديرية مطلقة بلا ضابط' },
       { term:'ما يلزم',             why:'نطاق الالتزام غير محدد' },
@@ -636,6 +656,10 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         'عدم فرض','لا يجوز تحصيل','يُحظر تحصيل','لا يُسمح','تُلغى','يُلغى','بدون رسوم','دون مقابل','مجاناً'],
       impositions: ['تفرض','تُفرض','يفرض','يُفرض','يُحصَّل','تُحصّل','يحصل','تستوفي','تُستوفى',
         'يُستوفى','رسوم','رسم','عمولة','أجور','مقابل مالي','تعرفة'],
+      /* الإباحة تعارض المنع كما يعارضه الفرض: «يجوز إسناد إدارة المخاطر»
+         مقابل «يُحظر إسنادها» تعارضٌ صريح لا يقل عن تعارض الرسوم. */
+      permissions: ['يجوز','تجوز','يحق','تحق','يُسمح','يسمح','يمكن للبنك','يمكن للمؤسسة',
+        'له أن','لها أن','مسموح','بإمكان'],
       minTopicScore: 0.34,
       /* «المرجع يوجب وسياستك تمنع» غالبًا تنفيذٌ لا مخالفة، فعتبته أعلى */
       minTopicScoreTentative: 0.62,
@@ -648,7 +672,10 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
               'في موعد لا يتجاوز','في مدة أقصاها','بحد أعلى','ولا تتجاوز','أقصاها','في حدود'],
         min: ['لا تقل عن','لا يقل عن','على الأقل','بحد أدنى','كحد أدنى','لا تقل','لا يقل',
               'أكثر من','بما لا يقل عن','على ألا تقل'],
-        notice: ['قبل','مسبقاً بـ','سابقة على','قبل سريانه بـ','قبل موعد']
+        notice: ['قبل','مسبقاً بـ','سابقة على','قبل سريانه بـ','قبل موعد'],
+        /* الدورية: الفاصل الأقصر التزامٌ دائمًا، فتُقرأ حدًّا أعلى */
+        recur: ['مرة واحدة','مرة','مرتين','مرات','كل','دورياً','دوريا','بشكل دوري',
+                'سنوياً','سنويا','شهرياً','شهريا','ربع سنوي','نصف سنوي']
       }
     },
 
@@ -1853,10 +1880,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   function classify(normSentence, C) {
     var prohibits = E.hasAny(normSentence, C.proh);
     var imposes   = E.hasAny(normSentence, C.imp);
+    var permits   = E.hasAny(normSentence, C.perm);
     var requires  = E.hasAny(normSentence, C.req);
     return {
       prohibits: !!prohibits, prohibitTerm: prohibits,
+      // «يجوز» داخل «لا يجوز» ليست إباحة، فالمنع يلغيهما معًا
       imposes: !!imposes && !prohibits, imposeTerm: imposes,
+      permits: !!permits && !prohibits, permitTerm: permits,
       requires: !!requires && !prohibits
     };
   }
@@ -1872,6 +1902,8 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   /* ما الذي يُفرض؟ نأخذ ما بين لفظ الفرض وبداية المبلغ. */
   function subjectOf(rawSentence) {
     var t = rawSentence.replace(/\s+/g, ' ').trim();
+    var pm = t.match(/(?:يجوز|تجوز|يحق|يُسمح|يسمح|يمكن)\s+(?:ل[^\s]+\s+)?(.{4,110}?)(?=\s*(?:متى|إذا|بعد|وفق|حسب|،|\.|$))/);
+    if (pm) return pm[1].trim();
     var m = t.match(/(?:تفرض|تُفرض|يفرض|يُفرض|يُحصَّل|تُحصّل|يحصل|تستوفي|تُستوفى|يُستوفى)\s+(.{4,120}?)(?=\s*(?:بمبلغ|بقيمة|قدره|قدرها|مقدارها|بواقع|\d|،|\.|$))/);
     if (m) return m[1].trim();
     var f = t.match(/((?:رسوم|رسم|عمولة|أجور|مقابل مالي)[^،\.]{0,90})/);
@@ -1909,16 +1941,28 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 
   function dirCues(raw) {
     return {
-      max: E.normList(raw.max), min: E.normList(raw.min), notice: E.normList(raw.notice)
+      max: E.normList(raw.max), min: E.normList(raw.min),
+      notice: E.normList(raw.notice), recur: E.normList(raw.recur || [])
     };
   }
 
   /* اتجاه القيد يُقرأ مما يسبق المقدار مباشرة */
-  function directionOf(norm, at, cues) {
-    var win = norm.slice(Math.max(0, at - 34), at);
-    if (E.hasAny(win, cues.min)) return DIR.MIN;
-    if (E.hasAny(win, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار = حد أدنى
-    if (E.hasAny(win, cues.max)) return DIR.MAX;
+  function directionOf(norm, at, end, cues) {
+    var before = norm.slice(Math.max(0, at - 34), at);
+    var after = norm.slice(end, end + 22);
+
+    /* دورية التكرار تقلب المعنى: «مراجعة مرة واحدة سنوياً على الأقل» تعني
+       أن الفاصل بين المراجعتين سنةٌ على الأكثر — فمراجعةٌ كل ستة أشهر
+       التزامٌ لا مخالفة. بلا هذا الاستثناء يُقرأ «على الأقل» حدًّا أدنى
+       على المدة نفسها فتخرج إيجابية كاذبة. */
+    if (E.hasAny(before, cues.recur) || E.hasAny(after, cues.recur)) return DIR.MAX;
+
+    if (E.hasAny(before, cues.min)) return DIR.MIN;
+    if (E.hasAny(before, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار
+    if (E.hasAny(before, cues.max)) return DIR.MAX;
+    // الإشارة قد تلحق المقدار: «خلال ثلاثين يوماً كحد أقصى»
+    if (E.hasAny(after, cues.min)) return DIR.MIN;
+    if (E.hasAny(after, cues.max)) return DIR.MAX;
     return DIR.EXACT;
   }
 
@@ -1949,7 +1993,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     E.findDurations(norm).forEach(function (d) {
       if (d.s < a || d.e > b) return;
       out.push({ kind: 'مدة', base: d.days * 24, unit: 'ساعة',
-                 s: d.s, e: d.e, dir: directionOf(norm, d.s, cues) });
+                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues) });
     });
     var seg = norm.slice(a, b), mre = moneyRegex();
     mre.lastIndex = 0;
@@ -1958,13 +2002,13 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       if (val === null) continue;
       out.push({ kind: 'مبلغ', base: val, unit: 'عملة',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
     }
     PCT_G.lastIndex = 0;
     while ((m = PCT_G.exec(seg))) {
       out.push({ kind: 'نسبة', base: parseFloat(m[1]), unit: '٪',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
     }
     return out;
   }
@@ -1993,6 +2037,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     var C = {
       proh: E.normList(raw.conflict.prohibitions),
       imp:  E.normList(raw.conflict.impositions),
+      perm: E.normList(raw.conflict.permissions),
       req:  E.normList(raw.deontic)
     };
     var minScore = raw.conflict.minTopicScore;
@@ -2082,6 +2127,7 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
         var dc = docCls[di];
         // تعارض حقيقي: المرجع يمنع وسياستك تفرض، أو المرجع يوجب وسياستك تمنع
         var kind = (rc.prohibits && dc.imposes) ? 'يمنعه المرجع وسياستك تفرضه'
+                 : (rc.prohibits && dc.permits) ? 'يمنعه المرجع وسياستك تُجيزه'
                  : (rc.requires && dc.prohibits) ? 'يوجبه المرجع وسياستك تمنعه' : null;
         if (!kind) return;
         /* بندٌ يمنع شيئًا قد يكون تنفيذًا للمتطلب لا مخالفةً له («لا يجوز
@@ -2144,6 +2190,12 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
       return art + ' (معدَّلة):\n' + c.docQuote.replace(/\s+/g, ' ').trim() +
         '\nعلى أن تكون القيمة «' + q.refOrig + '» بدلًا من «' + q.docOrig +
         '»، التزامًا بـ' + ref + '.';
+    }
+    if (c.kind.indexOf('تُجيزه') > -1) {
+      return art + ' (معدَّلة):\n' +
+        'لا يجوز ' + c.core + '، التزامًا بما ورد في ' + ref + '.\n' +
+        'ويُلغى كل ما يخالف ذلك في هذا البند اعتبارًا من ' +
+        (v.effectiveDate || '[تاريخ النفاذ]') + '.';
     }
     if (c.kind.indexOf('تفرضه') > -1) {
       return art + ' (معدَّلة):\n' +
@@ -2845,21 +2897,31 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
     });
   }
 
+  var gapTypeInfo = {
+    'بند مفقود': { icon: 'shield', label: 'بند مفقود', desc: 'بند معياري لم يُعالج في المستند' },
+    'موعد متجاوز': { icon: 'doc', label: 'موعد متجاوز', desc: 'التزام مضى موعده' },
+    'التزام بلا موعد': { icon: 'doc', label: 'التزام بلا موعد', desc: 'التزام بلا تاريخ أو مدة محددة' },
+    'صياغة فضفاضة': { icon: 'doc', label: 'صياغة فضفاضة', desc: 'عبارة غير قابلة للقياس أو التحقق' },
+    'متطلب غير مغطى': { icon: 'doc', label: 'متطلب غير مغطى', desc: 'متطلب من المرجع لم يُعالج كفاية' }
+  };
   function gapCard(doc, g) {
     var t = ST.taskOf(doc, g.code);
+    var info = gapTypeInfo[g.type] || { icon: 'doc', label: g.type, desc: '' };
     var ev = g.evidenceType === 'absence'
       ? '<div class="absence"><span class="lb">غياب موثّق</span>لم يرد في المستند أيٌّ من الصيغ الشائعة لهذا البند.</div>'
       : '<button type="button" class="evidence" data-q="' + esc(g.evidence) + '"' +
         (g.evidenceType === 'reference' ? ' data-src="ref"' : '') + '><span class="lb">' +
         (g.evidenceType === 'reference' ? 'من المستند المرجعي — اضغط لعرض الموضع' : 'من نص مستندك — اضغط لعرض الموضع') +
         '</span>«' + esc(g.evidence) + '»</button>';
+    var typeTag = '<span class="gap-type-tag" title="' + esc(info.desc) + '">' +
+      ico(info.icon, 13) + '<span>' + esc(info.label) + '</span></span>';
     return '<div class="gap-card ' + (t.status === 'done' ? 'done' : g.severity) + '">' +
       '<div class="gap-head"><div><div class="gap-title">' + esc(g.title) + '</div>' +
-      '<div class="gap-meta"><span class="code">' + g.code + '</span><span class="gap-type">' + esc(g.type) + '</span></div></div>' +
+      '<div class="gap-meta"><span class="code">' + g.code + '</span>' + typeTag + '</div></div>' +
       '<span class="badge ' + (t.status === 'done' ? 'mute' : sevBadge(g.severity)) + '">' +
       (t.status === 'done' ? 'مكتمل' : g.risk) + '</span></div>' +
       '<div class="gap-desc">' + esc(g.description) + '</div>' + ev +
-      '<div class="gap-rec">' + esc(g.recommendation) + '</div>' +
+      '<div class="gap-rec">' + ico('doc', 14) + '<div><div class="rec-label">الإجراء المطلوب:</div><div>' + esc(g.recommendation) + '</div></div></div>' +
       '<details class="why"><summary>كيف حُسبت الدرجة؟</summary>' +
       '<div class="mathbox">احتمالية <b>' + g.probability.toFixed(2) + '</b><span class="op">×</span>' +
       'أثر <b>' + g.impact.toFixed(2) + '</b><span class="op">×</span>زمن <b>' + g.decay.toFixed(2) + '</b>' +
@@ -2874,7 +2936,16 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
   }
   function tabGaps(doc, r) {
     var st = r.stats;
-    var html = '<div class="filters" id="gf">' +
+    var legend = '<div class="gap-legend">' +
+      '<div class="legend-title">أنواع الفجوات:</div>' +
+      '<div class="legend-items">' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('shield', 11) + 'بند مفقود</span><span class="legend-desc">بند معياري لم يُعالج</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'موعد متجاوز</span><span class="legend-desc">التزام مضى موعده</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'صياغة فضفاضة</span><span class="legend-desc">عبارة غير قابلة للقياس</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'التزام بلا موعد</span><span class="legend-desc">بلا تاريخ أو مدة محددة</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'متطلب غير مغطى</span><span class="legend-desc">متطلب من المرجع بلا معادل</span></div>' +
+      '</div></div>';
+    var html = legend + '<div class="filters" id="gf">' +
       fbtn('all', 'الكل', r.openGaps.length) + fbtn('critical', 'حرجة', st.critical) +
       fbtn('medium', 'متوسطة', st.medium) + fbtn('low', 'منخفضة', st.low) +
       (r.doneCount ? fbtn('done', 'مكتملة', r.doneCount) : '') + '</div><div id="gl"></div>';

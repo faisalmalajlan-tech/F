@@ -591,21 +591,31 @@
     });
   }
 
+  var gapTypeInfo = {
+    'بند مفقود': { icon: 'shield', label: 'بند مفقود', desc: 'بند معياري لم يُعالج في المستند' },
+    'موعد متجاوز': { icon: 'doc', label: 'موعد متجاوز', desc: 'التزام مضى موعده' },
+    'التزام بلا موعد': { icon: 'doc', label: 'التزام بلا موعد', desc: 'التزام بلا تاريخ أو مدة محددة' },
+    'صياغة فضفاضة': { icon: 'doc', label: 'صياغة فضفاضة', desc: 'عبارة غير قابلة للقياس أو التحقق' },
+    'متطلب غير مغطى': { icon: 'doc', label: 'متطلب غير مغطى', desc: 'متطلب من المرجع لم يُعالج كفاية' }
+  };
   function gapCard(doc, g) {
     var t = ST.taskOf(doc, g.code);
+    var info = gapTypeInfo[g.type] || { icon: 'doc', label: g.type, desc: '' };
     var ev = g.evidenceType === 'absence'
       ? '<div class="absence"><span class="lb">غياب موثّق</span>لم يرد في المستند أيٌّ من الصيغ الشائعة لهذا البند.</div>'
       : '<button type="button" class="evidence" data-q="' + esc(g.evidence) + '"' +
         (g.evidenceType === 'reference' ? ' data-src="ref"' : '') + '><span class="lb">' +
         (g.evidenceType === 'reference' ? 'من المستند المرجعي — اضغط لعرض الموضع' : 'من نص مستندك — اضغط لعرض الموضع') +
         '</span>«' + esc(g.evidence) + '»</button>';
+    var typeTag = '<span class="gap-type-tag" title="' + esc(info.desc) + '">' +
+      ico(info.icon, 13) + '<span>' + esc(info.label) + '</span></span>';
     return '<div class="gap-card ' + (t.status === 'done' ? 'done' : g.severity) + '">' +
       '<div class="gap-head"><div><div class="gap-title">' + esc(g.title) + '</div>' +
-      '<div class="gap-meta"><span class="code">' + g.code + '</span><span class="gap-type">' + esc(g.type) + '</span></div></div>' +
+      '<div class="gap-meta"><span class="code">' + g.code + '</span>' + typeTag + '</div></div>' +
       '<span class="badge ' + (t.status === 'done' ? 'mute' : sevBadge(g.severity)) + '">' +
       (t.status === 'done' ? 'مكتمل' : g.risk) + '</span></div>' +
       '<div class="gap-desc">' + esc(g.description) + '</div>' + ev +
-      '<div class="gap-rec">' + esc(g.recommendation) + '</div>' +
+      '<div class="gap-rec">' + ico('doc', 14) + '<div><div class="rec-label">الإجراء المطلوب:</div><div>' + esc(g.recommendation) + '</div></div></div>' +
       '<details class="why"><summary>كيف حُسبت الدرجة؟</summary>' +
       '<div class="mathbox">احتمالية <b>' + g.probability.toFixed(2) + '</b><span class="op">×</span>' +
       'أثر <b>' + g.impact.toFixed(2) + '</b><span class="op">×</span>زمن <b>' + g.decay.toFixed(2) + '</b>' +
@@ -620,7 +630,16 @@
   }
   function tabGaps(doc, r) {
     var st = r.stats;
-    var html = '<div class="filters" id="gf">' +
+    var legend = '<div class="gap-legend">' +
+      '<div class="legend-title">أنواع الفجوات:</div>' +
+      '<div class="legend-items">' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('shield', 11) + 'بند مفقود</span><span class="legend-desc">بند معياري لم يُعالج</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'موعد متجاوز</span><span class="legend-desc">التزام مضى موعده</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'صياغة فضفاضة</span><span class="legend-desc">عبارة غير قابلة للقياس</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'التزام بلا موعد</span><span class="legend-desc">بلا تاريخ أو مدة محددة</span></div>' +
+      '<div class="legend-item"><span class="legend-tag">' + ico('doc', 11) + 'متطلب غير مغطى</span><span class="legend-desc">متطلب من المرجع بلا معادل</span></div>' +
+      '</div></div>';
+    var html = legend + '<div class="filters" id="gf">' +
       fbtn('all', 'الكل', r.openGaps.length) + fbtn('critical', 'حرجة', st.critical) +
       fbtn('medium', 'متوسطة', st.medium) + fbtn('low', 'منخفضة', st.low) +
       (r.doneCount ? fbtn('done', 'مكتملة', r.doneCount) : '') + '</div><div id="gl"></div>';

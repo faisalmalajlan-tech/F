@@ -22,10 +22,13 @@
   function classify(normSentence, C) {
     var prohibits = E.hasAny(normSentence, C.proh);
     var imposes   = E.hasAny(normSentence, C.imp);
+    var permits   = E.hasAny(normSentence, C.perm);
     var requires  = E.hasAny(normSentence, C.req);
     return {
       prohibits: !!prohibits, prohibitTerm: prohibits,
+      // «يجوز» داخل «لا يجوز» ليست إباحة، فالمنع يلغيهما معًا
       imposes: !!imposes && !prohibits, imposeTerm: imposes,
+      permits: !!permits && !prohibits, permitTerm: permits,
       requires: !!requires && !prohibits
     };
   }
@@ -41,6 +44,8 @@
   /* ما الذي يُفرض؟ نأخذ ما بين لفظ الفرض وبداية المبلغ. */
   function subjectOf(rawSentence) {
     var t = rawSentence.replace(/\s+/g, ' ').trim();
+    var pm = t.match(/(?:يجوز|تجوز|يحق|يُسمح|يسمح|يمكن)\s+(?:ل[^\s]+\s+)?(.{4,110}?)(?=\s*(?:متى|إذا|بعد|وفق|حسب|،|\.|$))/);
+    if (pm) return pm[1].trim();
     var m = t.match(/(?:تفرض|تُفرض|يفرض|يُفرض|يُحصَّل|تُحصّل|يحصل|تستوفي|تُستوفى|يُستوفى)\s+(.{4,120}?)(?=\s*(?:بمبلغ|بقيمة|قدره|قدرها|مقدارها|بواقع|\d|،|\.|$))/);
     if (m) return m[1].trim();
     var f = t.match(/((?:رسوم|رسم|عمولة|أجور|مقابل مالي)[^،\.]{0,90})/);
@@ -78,16 +83,28 @@
 
   function dirCues(raw) {
     return {
-      max: E.normList(raw.max), min: E.normList(raw.min), notice: E.normList(raw.notice)
+      max: E.normList(raw.max), min: E.normList(raw.min),
+      notice: E.normList(raw.notice), recur: E.normList(raw.recur || [])
     };
   }
 
   /* اتجاه القيد يُقرأ مما يسبق المقدار مباشرة */
-  function directionOf(norm, at, cues) {
-    var win = norm.slice(Math.max(0, at - 34), at);
-    if (E.hasAny(win, cues.min)) return DIR.MIN;
-    if (E.hasAny(win, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار = حد أدنى
-    if (E.hasAny(win, cues.max)) return DIR.MAX;
+  function directionOf(norm, at, end, cues) {
+    var before = norm.slice(Math.max(0, at - 34), at);
+    var after = norm.slice(end, end + 22);
+
+    /* دورية التكرار تقلب المعنى: «مراجعة مرة واحدة سنوياً على الأقل» تعني
+       أن الفاصل بين المراجعتين سنةٌ على الأكثر — فمراجعةٌ كل ستة أشهر
+       التزامٌ لا مخالفة. بلا هذا الاستثناء يُقرأ «على الأقل» حدًّا أدنى
+       على المدة نفسها فتخرج إيجابية كاذبة. */
+    if (E.hasAny(before, cues.recur) || E.hasAny(after, cues.recur)) return DIR.MAX;
+
+    if (E.hasAny(before, cues.min)) return DIR.MIN;
+    if (E.hasAny(before, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار
+    if (E.hasAny(before, cues.max)) return DIR.MAX;
+    // الإشارة قد تلحق المقدار: «خلال ثلاثين يوماً كحد أقصى»
+    if (E.hasAny(after, cues.min)) return DIR.MIN;
+    if (E.hasAny(after, cues.max)) return DIR.MAX;
     return DIR.EXACT;
   }
 
@@ -118,7 +135,7 @@
     E.findDurations(norm).forEach(function (d) {
       if (d.s < a || d.e > b) return;
       out.push({ kind: 'مدة', base: d.days * 24, unit: 'ساعة',
-                 s: d.s, e: d.e, dir: directionOf(norm, d.s, cues) });
+                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues) });
     });
     var seg = norm.slice(a, b), mre = moneyRegex();
     mre.lastIndex = 0;
@@ -127,13 +144,13 @@
       if (val === null) continue;
       out.push({ kind: 'مبلغ', base: val, unit: 'عملة',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
     }
     PCT_G.lastIndex = 0;
     while ((m = PCT_G.exec(seg))) {
       out.push({ kind: 'نسبة', base: parseFloat(m[1]), unit: '٪',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
     }
     return out;
   }
@@ -162,6 +179,7 @@
     var C = {
       proh: E.normList(raw.conflict.prohibitions),
       imp:  E.normList(raw.conflict.impositions),
+      perm: E.normList(raw.conflict.permissions),
       req:  E.normList(raw.deontic)
     };
     var minScore = raw.conflict.minTopicScore;
@@ -251,6 +269,7 @@
         var dc = docCls[di];
         // تعارض حقيقي: المرجع يمنع وسياستك تفرض، أو المرجع يوجب وسياستك تمنع
         var kind = (rc.prohibits && dc.imposes) ? 'يمنعه المرجع وسياستك تفرضه'
+                 : (rc.prohibits && dc.permits) ? 'يمنعه المرجع وسياستك تُجيزه'
                  : (rc.requires && dc.prohibits) ? 'يوجبه المرجع وسياستك تمنعه' : null;
         if (!kind) return;
         /* بندٌ يمنع شيئًا قد يكون تنفيذًا للمتطلب لا مخالفةً له («لا يجوز
@@ -313,6 +332,12 @@
       return art + ' (معدَّلة):\n' + c.docQuote.replace(/\s+/g, ' ').trim() +
         '\nعلى أن تكون القيمة «' + q.refOrig + '» بدلًا من «' + q.docOrig +
         '»، التزامًا بـ' + ref + '.';
+    }
+    if (c.kind.indexOf('تُجيزه') > -1) {
+      return art + ' (معدَّلة):\n' +
+        'لا يجوز ' + c.core + '، التزامًا بما ورد في ' + ref + '.\n' +
+        'ويُلغى كل ما يخالف ذلك في هذا البند اعتبارًا من ' +
+        (v.effectiveDate || '[تاريخ النفاذ]') + '.';
     }
     if (c.kind.indexOf('تفرضه') > -1) {
       return art + ' (معدَّلة):\n' +
