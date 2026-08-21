@@ -268,8 +268,7 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(bs.on && !bs.paused, 'وتعود بالرجوع إلى الرئيسية');
 
   console.log('\n— رفع دفعة من الملفات —');
-  /* الحالة الشائعة: عدة سياسات مقابل مرجع واحد. كان لا بد من رفعها
-     واحدةً واحدة، وبعد كل تحليل تنتقل الصفحة فيضيع الطريق إلى التالي. */
+  /* الحالة الشائعة: عدة سياسات مقابل مرجع واحد، والرفع والحفظ فعلٌ واحد. */
   await nav('docs');
   await page.click('#pageContent [data-r="upload"]'); await page.waitForTimeout(320);
   ok(await page.evaluate(() => document.getElementById('fi_doc1').multiple),
@@ -283,37 +282,44 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
     el.files = dt.files;
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }, { sel, items });
-
-  const before = await page.evaluate(() => {
+  const docCount = () => page.evaluate(() => {
     try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return 0; }
   });
+
+  /* ١ — التحرير قبل الانطلاق: نوقفه، نعدّل، ثم نطلقه بالزرّ */
+  await putFiles('#fi_doc2', [{ name: 'المرجع.txt', text: POL }]);
+  await page.waitForTimeout(250);
   await putFiles('#fi_doc1', [
     { name: 'سياسة ألف.txt', text: PROC },
     { name: 'سياسة باء.txt', text: FEEPOL },
     { name: 'سياسة جيم.txt', text: PROC.replace('2026/01/15', '2026/05/15') }
   ]);
-  await page.waitForTimeout(700);
-  ok((await page.locator('.bl-row').count()) === 3, 'ثلاثة ملفات معروضة في قائمة الدفعة');
-  await putFiles('#fi_doc2', [{ name: 'المرجع.txt', text: POL }]);
-  await page.waitForTimeout(400);
-  /* إزالة ملف من القائمة قبل التحليل */
-  await page.click('.bl-x'); await page.waitForTimeout(250);
-  ok((await page.locator('.bl-row').count()) === 2, 'إزالة ملف من الدفعة تعمل');
-  await putFiles('#fi_doc1', [{ name: 'سياسة دال.txt', text: FEEPOL }]);
   await page.waitForTimeout(500);
-  ok((await page.locator('.bl-row').count()) === 3, 'وإضافة ملف إلى دفعة قائمة تعمل');
-
+  ok((await page.locator('.bl-row').count()) === 3, 'ثلاثة ملفات معروضة في قائمة الدفعة');
+  ok((await page.locator('.auto-note').count()) === 1, 'وإشعار الانطلاق التلقائي ظاهر');
+  await page.click('.auto-stop'); await page.waitForTimeout(200);
+  const before = await docCount();
+  await page.waitForTimeout(2600);
+  ok((await docCount()) === before, 'زر الإيقاف يمنع الانطلاق');
+  await page.click('.bl-x'); await page.waitForTimeout(250);
+  ok((await page.locator('.bl-row').count()) === 2, 'وإزالة ملف من الدفعة تعمل');
   await page.click('#analyzeBtn'); await page.waitForTimeout(4200);
-  const after = await page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return 0; }
-  });
-  ok(after === before + 3, 'حُفظت الثلاثة دفعةً واحدة: ' + before + ' → ' + after);
-  ok((await page.locator('#pageContent').textContent()).indexOf('حُلِّلت') > -1,
-     'ورسالة تؤكد عدد ما حُلِّل');
-  /* كل مستند أخذ اسم ملفه */
-  const names = await page.locator('.doc-card .doc-name, .doc-card').allTextContents();
+  ok((await docCount()) === before + 2, 'ثم الزرّ يحلّل الاثنين الباقيين: ' +
+     before + ' → ' + (await docCount()));
+
+  /* ٢ — الانطلاق التلقائي: نختار ولا نضغط شيئًا */
+  await nav('docs');
+  await page.click('#pageContent [data-r="upload"]'); await page.waitForTimeout(320);
+  const b2 = await docCount();
+  await putFiles('#fi_doc2', [{ name: 'المرجع.txt', text: POL }]);
+  await page.waitForTimeout(250);
+  await putFiles('#fi_doc1', [{ name: 'سياسة دال.txt', text: FEEPOL }]);
+  await page.waitForTimeout(5200);
+  ok((await docCount()) === b2 + 1, 'الاختيار وحده يحلّل ويحفظ بلا ضغط زر');
+  ok((await page.locator('#pageContent').textContent()).indexOf('حُلِّل') > -1,
+     'ورسالة تؤكد ما حُلِّل');
+  const names = await page.locator('.doc-card').allTextContents();
   ok(names.join(' ').indexOf('سياسة باء') > -1, 'كل مستند حمل اسم ملفه');
-  /* والمرجع نفسه طُبِّق على الكل */
   const allHaveRef = await page.evaluate(() => {
     try {
       const all = JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]');
@@ -323,6 +329,7 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(allHaveRef, 'والمرجع نفسه حُفظ مع كل واحد منها');
 
   console.log('\n— الطريق إلى مستند آخر —');
+  await nav('docs');
   await page.click('.doc-main'); await page.waitForTimeout(420);
   ok((await page.locator('.doc-top [data-r="upload"]').count()) === 1,
      'صفحة المستند فيها زر «تحليل مستند آخر»');

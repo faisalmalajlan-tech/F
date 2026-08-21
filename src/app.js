@@ -1313,21 +1313,25 @@
       '<select id="docType">' + Object.keys(S.cfg.docTypes).map(function (t) {
         return '<option' + (t === S.draft.type ? ' selected' : '') + '>' + esc(t) + '</option>';
       }).join('') + '</select>' +
-      '<div class="doclabel" style="margin-top:18px">المستند — مطلوب</div>' +
-      '<button type="button" class="drop" id="drop_doc1"><div class="ic">' + ico('doc', 22) + '</div>' +
-      '<div class="mt">اسحب الملفات أو اضغط للاختيار</div>' +
-      '<div class="ht">PDF · TXT — يمكن اختيار عدة ملفات دفعة واحدة</div></button>' +
-      '<input type="file" id="fi_doc1" accept=".pdf,.txt,.md" multiple style="display:none"><div id="info_doc1"></div>' +
-      '<textarea id="paste_doc1" placeholder="أو الصق النص مباشرة..."></textarea>' +
-      '<hr class="hair">' +
-      '<div class="doclabel">المرجع التنظيمي — اختياري</div>' +
-      '<div class="ht" style="margin-bottom:10px;color:var(--text3);font-size:10px">' +
-      'يُقارَن به كل مستند من الملفات أعلاه.</div>' +
+      /* المرجع أولًا: هو الثابت الذي تُقاس عليه كل الملفات، فتقديمه
+         يجعل الترتيب طبيعيًا — تختار المرجع مرة، ثم ترمي الملفات
+         فتُحلَّل وتُحفَظ في اللحظة نفسها بلا زرّ. */
+      '<div class="doclabel" style="margin-top:18px">المرجع التنظيمي — اختياري</div>' +
+      '<div class="hintline">اختره أولًا: يُقارَن به كل ما ترفعه بعده.</div>' +
       '<button type="button" class="drop" id="drop_doc2"><div class="ic">' + ico('docs', 22) + '</div>' +
       '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
       '<input type="file" id="fi_doc2" accept=".pdf,.txt,.md" style="display:none"><div id="info_doc2"></div>' +
-      '<textarea id="paste_doc2" placeholder="أو الصق النص مباشرة..."></textarea>' +
-      '<div style="margin-top:20px"><button class="btn" id="analyzeBtn">حلّل واحفظ</button></div>' +
+      '<textarea id="paste_doc2" placeholder="أو الصق نص المرجع مباشرة..."></textarea>' +
+      '<hr class="hair">' +
+
+      '<div class="doclabel">المستندات — مطلوب</div>' +
+      '<div class="hintline">تُحلَّل وتُحفَظ فور اختيارها — بلا خطوة إضافية.</div>' +
+      '<button type="button" class="drop hot" id="drop_doc1"><div class="ic">' + ico('doc', 22) + '</div>' +
+      '<div class="mt">اسحب الملفات أو اضغط للاختيار</div>' +
+      '<div class="ht">PDF · TXT — عدة ملفات دفعة واحدة</div></button>' +
+      '<input type="file" id="fi_doc1" accept=".pdf,.txt,.md" multiple style="display:none"><div id="info_doc1"></div>' +
+      '<textarea id="paste_doc1" placeholder="أو الصق النص مباشرة..."></textarea>' +
+      '<div style="margin-top:16px"><button class="btn" id="analyzeBtn">حلّل واحفظ النص الملصوق</button></div>' +
       '<div id="errArea"></div></div>';
     wire(el);
     ['doc1', 'doc2'].forEach(function (key) {
@@ -1365,10 +1369,13 @@
     var files = Array.prototype.slice.call(fileList || []);
     if (!files.length) return;
     if (key === 'doc2') { handleFile(files[0], key); return; }   // المرجع واحد دائمًا
-    if (files.length === 1 && !S.batch.length) { handleFile(files[0], key); return; }
 
+    /* الرفع والحفظ فعلٌ واحد: ما إن تُختار الملفات حتى تُقرأ وتُحلَّل
+       وتُحفظ. الزرّ لم يعد لازمًا إلا للنص الملصوق، إذ لا حدث اختيارٍ
+       يُطلقه. */
     var info = $('info_doc1');
-    info.innerHTML = '<div class="fileinfo"><span>جارٍ قراءة ' + files.length + ' ملفات…</span></div>';
+    info.innerHTML = '<div class="fileinfo"><span>جارٍ قراءة ' + files.length +
+      (files.length === 1 ? ' ملف…' : ' ملفات…') + '</span></div>';
     Promise.all(files.map(function (f) {
       return readFileText(f).then(
         function (t) { return { name: f.name, text: t, ok: true }; },
@@ -1378,7 +1385,34 @@
       var bad = all.filter(function (r) { return !r.ok; });
       showBatch();
       if (bad.length) showError('تعذّرت قراءة: ' + bad.map(function (b) { return b.name; }).join('، '));
+      if (S.batch.length) autoRun();
     });
+  }
+
+  /* يبدأ التحليل من نفسه بعد الاختيار. المهلة تكفي لاختيار دفعةٍ ثانية
+     أو لإزالة ملف قبل أن ينطلق، وتُلغى وتُستأنف مع كل إضافة. ومن أرادها
+     أطول ضغط «إيقاف» وتصرّف على مهله. */
+  var autoTimer = null;
+  function autoRun() {
+    if (autoTimer) clearTimeout(autoTimer);
+    var box = $('info_doc1');
+    if (box && !box.querySelector('.auto-note')) {
+      var n = document.createElement('div');
+      n.className = 'auto-note';
+      n.innerHTML = '<span>سيبدأ التحليل والحفظ تلقائيًا…</span>' +
+                    '<button type="button" class="auto-stop">إيقاف</button>';
+      box.appendChild(n);
+      n.querySelector('.auto-stop').addEventListener('click', function () {
+        if (autoTimer) clearTimeout(autoTimer);
+        autoTimer = null; n.remove();
+      });
+    }
+    autoTimer = setTimeout(function () {
+      autoTimer = null;
+      if (!S.batch.length) return;
+      var t2 = ((S.files.doc2 ? S.files.doc2.text : '') + '\n\n' + (S.draft.doc2 || '')).trim();
+      runBatch(t2);
+    }, 2200);
   }
 
   function showBatch() {
