@@ -46,7 +46,7 @@ const P = f => fs.readFileSync(path.resolve(__dirname, '../samples/' + f), 'utf8
   });
   await page.reload(); await page.waitForTimeout(1100);
   await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(200);
-  await page.screenshot({ path: 'dist/shot-home.png' });
+  await page.screenshot({ path: 'dist/shot-home.png', fullPage: true });
   await nav('docs');  await page.screenshot({ path: 'dist/shot-docs.png' });
   await nav('plan');  await page.screenshot({ path: 'dist/shot-plan.png' });
   await nav('docs'); await page.click('.doc-main'); await page.waitForTimeout(450);

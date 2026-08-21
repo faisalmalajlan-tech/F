@@ -407,13 +407,15 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 .grouplbl{font-size:10px;color:var(--gold);letter-spacing:.12em;margin:18px 0 8px}
 
 /* ── الداشبورد التنفيذي ── */
-.exec{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:14px}
-.exec-cell{background:var(--bg);padding:20px 15px;text-align:right}
+.exec{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);margin-bottom:14px}
+.exec-cell{background:var(--bg);padding:16px 15px;text-align:right}
 .exec-cell .v{font-size:30px;letter-spacing:-.02em}
 .exec-cell .l{font-size:10.5px;color:var(--text2);margin-top:7px;letter-spacing:.03em}
 .exec-cell .s{font-size:9.5px;color:var(--text3);margin-top:4px}
 .progress{height:5px;background:rgba(255,255,255,.05);overflow:hidden}
-.progress .pf{height:100%;background:var(--success)}
+.progress .pf{height:100%;background:var(--c-good);transform-origin:right center;
+  animation:grow .8s cubic-bezier(.22,.9,.3,1) backwards}
 .progress-lbl{display:flex;justify-content:space-between;margin-top:9px;font-size:10.5px;color:var(--text3);letter-spacing:.03em}
 .note{font-size:9.5px;color:var(--text3);line-height:1.85;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 
@@ -442,3 +444,99 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 .qcmp .qar{color:var(--text3);font-size:15px}
 .vtag{font-size:9px;color:var(--gold);border:1px solid rgba(216,190,134,.32);border-radius:2px;
   padding:2px 7px;letter-spacing:.05em;vertical-align:middle;font-weight:400}
+
+/* ═══════════ لوحة القيادة — الرسوم ═══════════
+   ألوان الرسوم درجاتٌ خاصة بها، مشتقّة من أطياف الحالة نفسها لكن
+   مُعاد ضبطها لتمرّ فحص الفصل اللوني على سطحٍ داكن: الزوج الأحمر/الكهرماني
+   في ألوان الواجهة كان ΔE ١٣٫١ (دون حدّ ١٥) فيصعب تمييزه حتى بالبصر
+   التام؛ هذه الدرجات ترفعه إلى ١٩٫٦، وفصلَ عمى الألوان إلى ١١٫٤.
+   نطاق الإضاءة يخرج قليلًا عن حدّ الأداة لأنه معايَر لسطحٍ أفتح كثيرًا
+   من سطحنا (L 0.20 مقابل 0.11) — والتباين يمرّ ≥3:1 لكل درجة. */
+:root{
+  --c-crit:#E8476B; --c-warn:#D9942B; --c-good:#2FBF91;
+  /* سُلّم تدرّجي أحادي الطيف للمقادير — على سطح داكن يكون الأكبر أفتح */
+  --seq-6:#F3E4BC; --seq-5:#E2CD9B; --seq-4:#CDB073;
+  --seq-3:#B4914E; --seq-2:#93712F; --seq-1:#6E521C;
+  --chart-grid:rgba(190,200,240,.09);
+  --chart-ink:#9AA2C6;
+}
+
+.dashgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin-bottom:14px}
+.chartcard{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:18px}
+.chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:4px}
+.chart-title{font-size:9.5px;letter-spacing:.16em;color:var(--gold);font-weight:600}
+.chart-sub{font-size:10px;color:var(--text3);font-weight:300}
+.chart-note{font-size:9.5px;color:var(--text3);line-height:1.75;margin-top:11px;font-weight:300}
+
+/* ── المؤشر القوسي ── */
+.gauge{position:relative;display:flex;justify-content:center;padding:4px 0 2px}
+.gauge svg{overflow:visible}
+.gauge .arcv{stroke-linecap:round;
+  stroke-dasharray:var(--len);stroke-dashoffset:var(--off);
+  animation:sweep 1.05s cubic-bezier(.22,.9,.3,1)}
+@keyframes sweep{from{stroke-dashoffset:var(--len)}}
+.gauge .tick{stroke:var(--chart-grid);stroke-width:1}
+.gauge-mid{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding-top:30px;pointer-events:none}
+.gauge-num{font-size:36px;font-weight:200;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.gauge-word{font-size:9.5px;letter-spacing:.14em;margin-top:5px;font-weight:500}
+.gauge-scale{display:flex;justify-content:space-between;font-size:9px;color:var(--text3);
+  margin-top:-6px;padding:0 6px;letter-spacing:.06em}
+
+/* ── الخط الزمني ── */
+.trend{position:relative}
+.trend svg{display:block;width:100%;height:auto}
+.trend .tline{fill:none;stroke:var(--gold);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;
+  stroke-dasharray:var(--len);stroke-dashoffset:0;animation:draw 1.15s ease-out}
+@keyframes draw{from{stroke-dashoffset:var(--len)}}
+.trend .tarea{animation:fadein .7s .5s ease-out backwards}
+@keyframes fadein{from{opacity:0}}
+.trend .tdot{fill:var(--gold);stroke:var(--bg);stroke-width:2;animation:fadein .4s .9s ease-out backwards}
+.trend .hit{fill:transparent;cursor:crosshair}
+.trend .cross{stroke:var(--line2);stroke-width:1;stroke-dasharray:2 3;opacity:0}
+.trend .cdot{fill:var(--gold2);stroke:var(--bg);stroke-width:2;opacity:0}
+.trend.on .cross,.trend.on .cdot{opacity:1}
+.tip{position:absolute;pointer-events:none;background:rgba(4,5,13,.96);border:1px solid var(--line2);
+  border-radius:3px;padding:7px 10px;font-size:10.5px;color:var(--text);white-space:nowrap;
+  opacity:0;transition:opacity .12s;z-index:6;line-height:1.6}
+.tip.on{opacity:1}
+.tip b{font-variant-numeric:tabular-nums;font-weight:500}
+.tip i{display:block;font-style:normal;color:var(--text3);font-size:9.5px;margin-top:2px}
+
+/* ── الأشرطة الأفقية ── */
+.hbars{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.hbar{display:grid;grid-template-columns:92px 1fr 26px;align-items:center;gap:10px;
+  background:none;border:none;padding:0;cursor:pointer;text-align:right;font-family:inherit}
+.hbar .hl{font-size:10.5px;color:var(--text2);font-weight:300;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.hbar .ht{background:rgba(255,255,255,.045);height:15px;border-radius:2px;overflow:hidden;position:relative}
+.hbar .ht{display:block}
+.hbar .hf{display:block;height:100%;border-radius:0 2px 2px 0;transform-origin:right center;
+  animation:grow .8s cubic-bezier(.22,.9,.3,1) backwards}
+@keyframes grow{from{transform:scaleX(0)}}
+.hbar .hv{font-size:12px;color:var(--text);font-variant-numeric:tabular-nums;text-align:left;font-weight:400}
+.hbar:hover .hl{color:var(--gold2)}
+.hbar:hover .ht{background:rgba(255,255,255,.08)}
+.hbar:focus-visible{outline:1px solid var(--gold);outline-offset:3px}
+
+/* ── شريط الخطورة المجزّأ ── */
+.sevbar{display:flex;gap:2px;height:19px;margin-top:14px}
+.sevseg{border-radius:2px;position:relative;transform-origin:right center;
+  animation:grow .75s cubic-bezier(.22,.9,.3,1) backwards;cursor:pointer;border:none;padding:0}
+.sevseg:focus-visible{outline:1px solid var(--gold);outline-offset:3px}
+.sevkeys{display:flex;flex-wrap:wrap;gap:13px;margin-top:12px}
+.sevkey{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text2);font-weight:300}
+.sevkey i{width:9px;height:9px;border-radius:2px;display:block;flex-shrink:0}
+.sevkey b{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums}
+
+/* الجدول البديل — الهوية لا تكون باللون وحده أبدًا */
+.charttable{width:100%;border-collapse:collapse;margin-top:10px;font-size:10.5px}
+.charttable th{text-align:right;color:var(--text3);font-weight:500;font-size:9px;
+  letter-spacing:.08em;padding:6px 4px;border-bottom:1px solid var(--line)}
+.charttable td{padding:6px 4px;border-bottom:1px solid var(--line);color:var(--text2);font-weight:300}
+.charttable td:last-child{text-align:left;font-variant-numeric:tabular-nums;color:var(--text)}
+details.tabletoggle summary{font-size:9.5px;color:var(--text3);cursor:pointer;margin-top:12px;
+  letter-spacing:.06em;list-style:none}
+details.tabletoggle summary::-webkit-details-marker{display:none}
+details.tabletoggle summary:before{content:'⌄ ';color:var(--gold)}
+details.tabletoggle[open] summary:before{content:'⌃ '}

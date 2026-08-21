@@ -181,6 +181,57 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok((await page.locator('.progress .pf').isVisible()), 'شريط الإنجاز ظاهر');
   ok(home.indexOf('بند يخالف المرجع') > -1, 'التعارض بارز في الداشبورد');
 
+  console.log('\n— رسوم لوحة القيادة —');
+  ok((await page.locator('.gauge .arcv').count()) === 1, 'المؤشر القوسي مرسوم');
+  /* الإزاحة تعكس الدرجة: صفرٌ يعني قوسًا ممتلئًا دائمًا مهما كان الخطر */
+  const off = await page.locator('.gauge .arcv').evaluate(
+    e => ({ o: parseFloat(getComputedStyle(e).strokeDashoffset), l: parseFloat(getComputedStyle(e).strokeDasharray) }));
+  ok(off.o > 0.5 && off.o < off.l, 'القوس يعكس الدرجة لا يمتلئ دائمًا: ' + off.o.toFixed(1) + '/' + off.l.toFixed(1));
+  ok((await page.locator('.chartcard').count()) >= 3, 'ثلاث بطاقات رسم على الأقل');
+  ok((await page.locator('.sevseg').count()) >= 2, 'شريط الخطورة مجزّأ');
+  /* الهوية لا تكون باللون وحده: لكل جزءٍ تسميته ولكل رسمٍ جدوله */
+  ok((await page.locator('.sevkey').count()) === (await page.locator('.sevseg').count()),
+     'لكل جزء خطورة تسمية مكتوبة');
+  ok((await page.locator('details.tabletoggle').count()) >= 1, 'لكل رسم شريطي جدول أرقام بديل');
+  const bars = await page.locator('.hbar').count();
+  ok(bars >= 4, 'أشرطة التوزيع مرسومة: ' + bars);
+  /* العلّة التي وقعنا فيها: عنصر داخلي يتجاهل العرض فتخرج الأشرطة فارغة */
+  const bw = await page.locator('.hbar .hf').first().evaluate(e => e.getBoundingClientRect().width);
+  ok(bw > 4, 'الشريط له عرضٌ فعلي لا صفر: ' + bw.toFixed(0) + 'px');
+
+  console.log('\n— التلميح التفاعلي —');
+  const svg = page.locator('#trendHome svg');
+  if (await svg.count()) {
+    const bb = await svg.boundingBox();
+    await page.mouse.move(bb.x + bb.width * 0.5, bb.y + bb.height * 0.5);
+    await page.waitForTimeout(220);
+    ok(await page.locator('#trendHome .tip.on').count() === 1, 'التمرير يُظهر التلميح');
+    const tipTxt = await page.locator('#trendHome .tip').textContent();
+    ok(/\d/.test(tipTxt), 'التلميح يحمل درجة اليوم: ' + tipTxt.trim().slice(0, 30));
+    await page.mouse.move(bb.x - 60, bb.y - 60); await page.waitForTimeout(200);
+    ok(await page.locator('#trendHome .tip.on').count() === 0, 'ومغادرة المؤشر تُخفيه');
+  }
+
+  console.log('\n— إطفاء الحركة لا يُخفي البيانات —');
+  /* حركةٌ تبدأ من الصفر وتنتهي عند القيمة تترك البيانات مخفيّة تمامًا
+     لمن أطفأ الحركة. الحالة النهائية هي الأصل، والحركة تأتي إليها. */
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.reload(); await page.waitForTimeout(900);
+  const still = await page.evaluate(() => {
+    const f = document.querySelector('.hf'), a = document.querySelector('.arcv'),
+          g = document.querySelector('.sevseg'), t = document.querySelector('.tline');
+    const w = e => e ? e.getBoundingClientRect().width : 0;
+    return { hf: w(f), seg: w(g),
+             arcOff: a ? parseFloat(getComputedStyle(a).strokeDashoffset) : -1,
+             lineOff: t ? parseFloat(getComputedStyle(t).strokeDashoffset) : -1 };
+  });
+  ok(still.hf > 4, 'الشريط الذهبي يبقى مرئيًا بلا حركة: ' + still.hf.toFixed(0) + 'px');
+  ok(still.seg > 4, 'وجزء الخطورة كذلك: ' + still.seg.toFixed(0) + 'px');
+  ok(still.lineOff === 0, 'ومنحنى الخطر يبقى مرسومًا كاملًا');
+  ok(still.arcOff > 0.5, 'والقوس يبقى عند قيمته لا عند الصفر');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.reload(); await page.waitForTimeout(700);
+
   console.log('\n— مستند ثالث والمحفظة —');
   await nav('docs'); await addDoc('عقد تشغيل', PROC.replace('2026/01/15', '2026/03/20'));
   await nav('home');

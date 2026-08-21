@@ -292,6 +292,7 @@
       refreshAll();
       (S.route === 'plan' ? renderPlan : renderDoc)();
     });
+    wireTrend(el);
   }
   function banner() {
     if (!S.banner) return '';
@@ -341,7 +342,8 @@
 
     var html = banner();
 
-    /* ١ — الحالة */
+    /* ١ — الحالة: مؤشر قوسي بدل رقمٍ مجرّد، ومنحنى المحفظة بجانبه */
+    var series = portfolioSeries();
     html += '<div class="risk-hero"><div class="top">' +
       '<div style="flex:1;min-width:180px">' +
       '<div class="eyebrow">لوحة الامتثال · ' + S.docs.length + ' مستند · ' + ST.today() + '</div>' +
@@ -349,12 +351,12 @@
       (x.conflicts ? '<div class="risk-badges"><span class="badge high">' + x.conflicts +
         ' بند يخالف المرجع</span></div>' : '') +
       '</div>' +
-      '<div style="text-align:center;min-width:112px">' +
-      '<div class="eyebrow">درجة الخطر</div>' +
-      '<div class="risk-num num" style="color:' + riskColor(pr) + '">' + pr + '</div>' +
-      '</div></div></div>';
+      '<div style="min-width:200px">' + gauge(pr) + '</div>' +
+      '</div></div>';
 
-    /* ٢ — أربعة أرقام تنفيذية */
+
+
+    /* ٢ — أربعة أرقام تنفيذية: الحصيلة قبل التفصيل */
     html += '<div class="exec">' +
       execCell(x.openGaps, 'مشكلة مفتوحة', x.totalGaps + ' إجمالًا', 'var(--warning)') +
       execCell(x.doneGaps, 'مشكلة انحلّت', x.pctDone + '٪ من الكل', 'var(--success)') +
@@ -363,6 +365,39 @@
       execCell(x.nextFine ? x.nextFine.o.daysRemaining : '—', 'يومًا لأقرب غرامة',
         x.nextFine ? money(x.nextFine.o.exposure) + ' ريال' : 'لا غرامة مؤرّخة', 'var(--gold)') +
       '</div>';
+
+    /* ٣ — الرسوم: مؤشر، منحنى، توزيع الخطورة، توزيع التعارضات */
+    var byRule = conflictsByRule(), byType = gapsByType(), stats = allStats();
+    var cards = [];
+    if (series.length >= 2) {
+      var first = series[0].r, lastP = series[series.length - 1].r, dlt = lastP - first;
+      cards.push('<div class="chartcard"><div class="chart-head">' +
+        '<div class="chart-title">مسار الخطر</div>' +
+        '<div class="chart-sub">' + series.length + ' يومًا · ' +
+        (dlt > 0.5 ? '▲ ' : dlt < -0.5 ? '▼ ' : '') + Math.abs(dlt).toFixed(1) + '</div></div>' +
+        trend(series, 'trendHome') +
+        '<div class="chart-note">مرّر لقراءة درجة أي يوم. الدرجة مجمّعة من كل المستندات.</div></div>');
+    }
+    if (stats.critical + stats.medium + stats.low) {
+      cards.push('<div class="chartcard"><div class="chart-head">' +
+        '<div class="chart-title">خطورة الفجوات المفتوحة</div>' +
+        '<div class="chart-sub">' + x.openGaps + ' مفتوحة</div></div>' +
+        sevBar(stats) +
+        '<div class="chart-note">اضغط أي جزء للانتقال إلى خطة المعالجة.</div></div>');
+    }
+    if (byRule.length) {
+      cards.push('<div class="chartcard"><div class="chart-head">' +
+        '<div class="chart-title">التعارضات بحسب القاعدة</div>' +
+        '<div class="chart-sub">' + x.conflicts + ' تعارضًا</div></div>' +
+        hbars(byRule, { head: ['القاعدة', 'التعارضات'] }) + '</div>');
+    }
+    if (byType.length) {
+      cards.push('<div class="chartcard"><div class="chart-head">' +
+        '<div class="chart-title">الفجوات بحسب النوع</div>' +
+        '<div class="chart-sub">' + x.openGaps + ' مفتوحة</div></div>' +
+        hbars(byType, { head: ['النوع', 'الفجوات'] }) + '</div>');
+    }
+    if (cards.length) html += '<div class="dashgrid">' + cards.join('') + '</div>';
 
     /* شريط الإنجاز */
     html += '<div class="card"><div class="sectitle">أين وصلت المعالجة</div>' +
@@ -438,6 +473,227 @@
   function execCell(v, l, s2, c) {
     return '<div class="exec-cell"><div class="v num" style="color:' + c + '">' + v + '</div>' +
       '<div class="l">' + l + '</div><div class="s">' + esc(s2) + '</div></div>';
+  }
+
+
+  /* ═══════════ رسوم لوحة القيادة ═══════════
+     كلها SVG مضمّن وحركة CSS — لا مكتبة ولا طلب شبكة، وقاعدة
+     prefers-reduced-motion العامة تُسكِّنها لمن طلب ذلك.
+     الهوية لا تُحمَل باللون وحده: لكل رسمٍ تسمياتٌ مباشرة وجدولٌ بديل. */
+
+  var CH = { crit: 'var(--c-crit)', warn: 'var(--c-warn)', good: 'var(--c-good)' };
+  /* درجة الخطر تختار لونها من عتبات الإعدادات نفسها لا من رقمٍ مثبَّت */
+  function chartRiskColor(r) {
+    var t = (S.cfg || NC.DEFAULTS).scoring.thresholds;
+    return r >= t.critical ? CH.crit : r >= t.medium ? CH.warn : CH.good;
+  }
+  /* نقف عند الدرجة الثانية: الأظلم تكاد تختفي على سطحٍ بهذا القتام،
+     والأشرطة الصغيرة أولى الناس بأن تُرى. */
+  var SEQ = ['var(--seq-6)', 'var(--seq-5)', 'var(--seq-4)',
+             'var(--seq-3)', 'var(--seq-2)'];
+  /* المقدار الأكبر يأخذ أفتح درجة: على سطحٍ داكن يكون الأفتح أبرز */
+  function seqStep(rank, total) {
+    if (total <= 1) return SEQ[0];
+    var i = Math.round(rank / (total - 1) * (SEQ.length - 1));
+    return SEQ[Math.min(SEQ.length - 1, Math.max(0, i))];
+  }
+
+  /* ── المؤشر القوسي: نسبةٌ واحدة مقابل حدّ ──
+     يمضي من اليمين إلى اليسار كاتجاه القراءة، كما يمضي منحنى الخطر. */
+  function gauge(pct, opts) {
+    var o = opts || {}, R = 76, CX = 96, CY = 88, SW = 14;
+    var p = Math.max(0, Math.min(100, pct));
+    // زاوية صفرٍ عن اليمين، وتزيد باتجاه اليسار مرورًا بالأعلى
+    var at = function (frac) {
+      var a = Math.PI * frac;
+      return (CX + R * Math.cos(a)).toFixed(2) + ' ' + (CY - R * Math.sin(a)).toFixed(2);
+    };
+    var full = 'M ' + at(0) + ' A ' + R + ' ' + R + ' 0 0 0 ' + at(1);
+    var len = Math.PI * R;
+    var col = chartRiskColor(p);
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+      var a = Math.PI * f, r1 = R - SW / 2 - 3, r2 = R - SW / 2 - 8;
+      return '<line class="tick" x1="' + (CX + r1 * Math.cos(a)).toFixed(1) +
+             '" y1="' + (CY - r1 * Math.sin(a)).toFixed(1) +
+             '" x2="' + (CX + r2 * Math.cos(a)).toFixed(1) +
+             '" y2="' + (CY - r2 * Math.sin(a)).toFixed(1) + '"/>';
+    }).join('');
+    return '<div class="gauge"><svg width="192" height="100" viewBox="0 0 192 100" ' +
+      'role="img" aria-label="درجة الخطر ' + Math.round(p) + ' من 100 — ' + esc(riskWord(p)) + '">' +
+      '<path d="' + full + '" fill="none" stroke="rgba(255,255,255,.07)" ' +
+        'stroke-width="' + SW + '" stroke-linecap="round"/>' +
+      ticks +
+      '<path class="arcv" d="' + full + '" fill="none" stroke="' + col + '" ' +
+        'stroke-width="' + SW + '" style="--len:' + len.toFixed(1) +
+        ';--off:' + (len * (1 - p / 100)).toFixed(1) + '"/>' +
+      '</svg>' +
+      '<div class="gauge-mid"><div class="gauge-num" style="color:' + col + '">' + Math.round(p) + '</div>' +
+      '<div class="gauge-word" style="color:' + col + '">' + esc(o.word || riskWord(p)) + '</div></div>' +
+      '</div><div class="gauge-scale"><span>0</span><span>50</span><span>100</span></div>';
+  }
+
+  /* ── منحنى الخطر عبر الزمن، بتقاطعٍ وتلميحٍ عند التمرير ── */
+  function trend(series, id) {
+    if (!series || series.length < 2) return '';
+    var W = 320, H = 108, PL = 6, PR = 6, PT = 10, PB = 16;
+    var lo = 100, hi = 0;
+    series.forEach(function (p) { lo = Math.min(lo, p.r); hi = Math.max(hi, p.r); });
+    if (hi - lo < 8) { hi = Math.min(100, hi + 4); lo = Math.max(0, lo - 4); }
+    var n = series.length;
+    // المحور الزمني يمضي من اليمين لليسار كاتجاه القراءة
+    var X = function (i) { return W - PR - (i / (n - 1)) * (W - PL - PR); };
+    var Y = function (v) { return PT + (1 - (v - lo) / (hi - lo || 1)) * (H - PT - PB); };
+    var d = series.map(function (p, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p.r).toFixed(1); }).join(' ');
+    var area = d + ' L ' + X(n - 1).toFixed(1) + ' ' + (H - PB) + ' L ' + X(0).toFixed(1) + ' ' + (H - PB) + ' Z';
+    var pts = series.map(function (p, i) {
+      return '{"x":' + X(i).toFixed(1) + ',"y":' + Y(p.r).toFixed(1) +
+             ',"r":' + p.r.toFixed(1) + ',"d":"' + p.d + '"}';
+    }).join(',');
+    var gid = 'tgrad' + id;
+    return '<div class="trend" id="' + id + '" data-pts=\'[' + pts + ']\'>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+      'role="img" aria-label="منحنى درجة الخطر عبر الزمن">' +
+      '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="var(--gold)" stop-opacity=".22"/>' +
+      '<stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/></linearGradient></defs>' +
+      '<line x1="' + PL + '" y1="' + (H - PB) + '" x2="' + (W - PR) + '" y2="' + (H - PB) +
+        '" stroke="var(--chart-grid)" stroke-width="1"/>' +
+      '<path class="tarea" d="' + area + '" fill="url(#' + gid + ')"/>' +
+      '<path class="tline" d="' + d + '" style="--len:' + (W * 2) + '"/>' +
+      '<circle class="tdot" cx="' + X(n - 1).toFixed(1) + '" cy="' + Y(series[n - 1].r).toFixed(1) + '" r="3.4"/>' +
+      '<line class="cross" x1="0" y1="' + PT + '" x2="0" y2="' + (H - PB) + '"/>' +
+      '<circle class="cdot" cx="0" cy="0" r="4"/>' +
+      '<rect class="hit" x="0" y="0" width="' + W + '" height="' + H + '"/></svg>' +
+      '<div class="tip"></div></div>';
+  }
+
+  /* يربط التتبّع على منحنًى مرسوم. النقاط في السمة لا في المتغيّرات
+     حتى يبقى الرسم صحيحًا بعد أي إعادة رسم للصفحة. */
+  function wireTrend(root) {
+    on(root, '.trend', 'mousemove', function (box, e) {
+      var pts; try { pts = JSON.parse(box.dataset.pts); } catch (err) { return; }
+      var svg = box.querySelector('svg'), rc = svg.getBoundingClientRect();
+      var vb = svg.viewBox.baseVal, ux = (e.clientX - rc.left) / rc.width * vb.width;
+      var best = pts[0], bd = 1e9;
+      pts.forEach(function (p) { var dd = Math.abs(p.x - ux); if (dd < bd) { bd = dd; best = p; } });
+      box.classList.add('on');
+      var cl = box.querySelector('.cross'), cd = box.querySelector('.cdot');
+      cl.setAttribute('x1', best.x); cl.setAttribute('x2', best.x);
+      cd.setAttribute('cx', best.x); cd.setAttribute('cy', best.y);
+      var tip = box.querySelector('.tip');
+      tip.innerHTML = '<b>' + Math.round(best.r) + '</b> درجة خطر<i>' + esc(best.d) + '</i>';
+      tip.classList.add('on');
+      var px = best.x / vb.width * rc.width;
+      tip.style.left = Math.max(4, Math.min(rc.width - 120, px - 56)) + 'px';
+      var ty = best.y / vb.height * rc.height - 54;
+      tip.style.top = (ty < 2 ? best.y / vb.height * rc.height + 16 : ty) + 'px';
+    });
+    on(root, '.trend', 'mouseleave', function (box) {
+      box.classList.remove('on');
+      box.querySelector('.tip').classList.remove('on');
+    });
+  }
+
+  /* ── أشرطة أفقية: مقارنة مقادير ── */
+  function hbars(rows, opts) {
+    var o = opts || {};
+    if (!rows.length) return '';
+    var max = rows.reduce(function (a, r) { return Math.max(a, r.v); }, 0) || 1;
+    var sorted = rows.slice().sort(function (a, b) { return b.v - a.v; });
+    return '<div class="hbars">' + sorted.map(function (r, i) {
+      var w = Math.max(2, r.v / max * 100);
+      return '<button type="button" class="hbar"' +
+        (r.nav ? ' data-r="' + r.nav + '"' : '') + (r.id ? ' data-id="' + r.id + '"' : '') +
+        ' title="' + esc(r.label + ': ' + r.v + (o.unit || '')) + '">' +
+        '<span class="hl">' + esc(r.label) + '</span>' +
+        '<span class="ht"><span class="hf" style="width:' + w.toFixed(1) + '%;background:' +
+          seqStep(i, sorted.length) + ';animation-delay:' + (i * 55) + 'ms"></span></span>' +
+        '<span class="hv">' + r.v + '</span></button>';
+    }).join('') + '</div>' + chartTable(sorted, o.head || ['البند', 'العدد']);
+  }
+
+  /* الجدول البديل يرافق كل رسم: من لا يميّز الألوان يقرأ الأرقام */
+  function chartTable(rows, head) {
+    return '<details class="tabletoggle"><summary>عرض الأرقام جدولًا</summary>' +
+      '<table class="charttable"><thead><tr><th>' + esc(head[0]) + '</th><th>' + esc(head[1]) +
+      '</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + esc(r.label) + '</td><td>' + r.v + '</td></tr>';
+      }).join('') + '</tbody></table></details>';
+  }
+
+  /* ── شريط الخطورة المجزّأ: ألوان حالة محجوزة، ومعها تسمياتها دائمًا ── */
+  function sevBar(st) {
+    var tot = st.critical + st.medium + st.low;
+    if (!tot) return '<div class="empty">لا فجوات مفتوحة.</div>';
+    var segs = [
+      { k: 'critical', l: 'حرجة', v: st.critical, c: CH.crit },
+      { k: 'medium', l: 'متوسطة', v: st.medium, c: CH.warn },
+      { k: 'low', l: 'منخفضة', v: st.low, c: CH.good }
+    ].filter(function (s) { return s.v > 0; });
+    return '<div class="sevbar">' + segs.map(function (s, i) {
+      return '<button type="button" class="sevseg" style="flex:' + s.v + ';background:' + s.c +
+        ';animation-delay:' + (i * 90) + 'ms" title="' + esc(s.l + ': ' + s.v) +
+        '" aria-label="' + esc(s.l + ' ' + s.v) + '" data-r="plan"></button>';
+    }).join('') + '</div>' +
+    '<div class="sevkeys">' + segs.map(function (s) {
+      return '<span class="sevkey"><i style="background:' + s.c + '"></i>' +
+        esc(s.l) + ' <b>' + s.v + '</b></span>';
+    }).join('') + '</div>';
+  }
+
+  /* منحنى المحفظة: الخطر المجمَّع في كل يومٍ سُجّل فيه شيء.
+     نأخذ آخر قراءة لكل مستند حتى ذلك اليوم — لا قراءة اليوم نفسه فقط،
+     وإلا هبط المجموع كلما غاب مستندٌ عن التسجيل. */
+  function portfolioSeries() {
+    var days = {}, i;
+    S.docs.forEach(function (d) {
+      ((d.history) || []).forEach(function (p) { days[p.d] = 1; });
+    });
+    var ds = Object.keys(days).sort();
+    if (ds.length < 2) return [];
+    return ds.slice(-30).map(function (day) {
+      var rs = [];
+      S.docs.forEach(function (d) {
+        var h = d.history || [], last = null;
+        for (i = 0; i < h.length; i++) if (h[i].d <= day) last = h[i].r;
+        if (last !== null) rs.push(last);
+      });
+      return { d: day, r: E.aggregateRisk(rs, S.cfg.scoring) };
+    });
+  }
+
+  /* توزيع التعارضات على القواعد السبع */
+  function conflictsByRule() {
+    var c = {};
+    S.docs.forEach(function (d) {
+      var r = S.analyses[d.id]; if (!r) return;
+      (r.conflicts || []).forEach(function (x) { c[x.rule] = (c[x.rule] || 0) + 1; });
+    });
+    return Object.keys(c).map(function (k) {
+      return { label: RULE_LABEL[k] || k, v: c[k] };
+    });
+  }
+
+  /* خطورة الفجوات المفتوحة عبر المحفظة. نعدّ المفتوحة وحدها لأن
+     العنوان يقول «مفتوحة» — و r.stats في المحرك يعدّ الكل بما أُنجز. */
+  function allStats() {
+    var st = { critical: 0, medium: 0, low: 0 };
+    S.docs.forEach(function (d) {
+      var r = S.analyses[d.id]; if (!r) return;
+      (r.openGaps || []).forEach(function (g) { if (st[g.severity] !== undefined) st[g.severity]++; });
+    });
+    return st;
+  }
+
+  /* توزيع الفجوات المفتوحة على أنواعها */
+  function gapsByType() {
+    var c = {};
+    S.docs.forEach(function (d) {
+      var r = S.analyses[d.id]; if (!r) return;
+      (r.openGaps || []).forEach(function (g) { c[g.type] = (c[g.type] || 0) + 1; });
+    });
+    return Object.keys(c).map(function (k) { return { label: k, v: c[k] }; });
   }
 
   /* ═══════════ ٢. المستندات ═══════════ */
