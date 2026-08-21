@@ -133,8 +133,9 @@
                           config: S.cfg, docType: doc.docType });
     res.docId = doc.id; res.docName = doc.name; res.caseCode = doc.caseCode;
 
-    /* التعارض المباشر أخطر من الفجوة: بندٌ في سياستك يفعل ما يمنعه المرجع.
-       يدخل قائمة الفجوات ليظهر في الخطر وخطة المعالجة، ويقود صفحة التعديلات. */
+    /* لكل قاعدةٍ عنوانُها وشرحها: «منع مقابل فرض» وصفٌ صادق للقاعدة
+       الأولى وحدها، وإطلاقُه على تعارض النطاق أو التعريف أو التسلسل
+       يقول للمراجع غيرَ ما رصده المحرك. */
     res.conflicts = doc.refText ? CF.detect({ docText: doc.text, refText: doc.refText, config: S.cfg }).conflicts : [];
     var ci = S.cfg.conflict.impact;
     res.conflicts.forEach(function (c) {
@@ -142,12 +143,8 @@
       var isNum = c.rule === 'حدّي';
       res.gaps.unshift({
         code: c.code, key: 'تعارض|' + c.key, type: 'تعارض مع المرجع',
-        title: isNum ? 'قيمة تخالف المرجع: ' + c.quantity.docOrig + ' مقابل ' + c.quantity.refOrig
-                     : 'بند يخالف المرجع: ' + c.core,
-        description: (isNum ? c.why + ' — المرجع يشترط «' + c.quantity.refOrig + '» وسياستك تنص على «' +
-                              c.quantity.docOrig + '».'
-                            : 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') + '.') +
-                     ' تطابق الموضوع ' + c.score + '٪.',
+        title: conflictTitle(c),
+        description: conflictDesc(c) + ' تطابق الموضوع ' + c.score + '٪.',
         recommendation: 'أصدر البند المعدَّل والتعميم من صفحة «التعديلات».',
         evidence: c.docQuote, evidenceType: 'quote',
         probability: 0.95, impact: ci, decay: 1, risk: risk,
@@ -598,6 +595,55 @@
     'صياغة فضفاضة': { icon: 'doc', label: 'صياغة فضفاضة', desc: 'عبارة غير قابلة للقياس أو التحقق' },
     'متطلب غير مغطى': { icon: 'doc', label: 'متطلب غير مغطى', desc: 'متطلب من المرجع لم يُعالج كفاية' }
   };
+  /* ═══ وصف التعارض بحسب قاعدته ═══ */
+  var RULE_LABEL = {
+    'حدّي':   'قيمة تخالف حدًّا',
+    'فعل':    'منع مقابل فرض',
+    'نطاق':   'نطاق أضيق',
+    'تعريف':  'تعريف أضيق',
+    'تسلسل':  'ترتيب مقلوب',
+    'إفراغ':  'إفراغ بالغموض'
+  };
+  function ruleLabel(c) { return RULE_LABEL[c.rule] || c.rule; }
+
+  var REF_SIDE = {
+    'حدّي': 'المرجع يشترط', 'فعل': 'المرجع يمنع', 'نطاق': 'المرجع يشمل',
+    'تعريف': 'المرجع يعرّفه', 'تسلسل': 'المرجع يوجبه قبل', 'إفراغ': 'المرجع يوجبه شمولًا'
+  };
+  var DOC_SIDE = {
+    'حدّي': 'سياستك تنص على', 'فعل': 'سياستك تفرض', 'نطاق': 'سياستك تستثنيه',
+    'تعريف': 'سياستك تعرّفه', 'تسلسل': 'سياستك تجعله بعد', 'إفراغ': 'سياستك تعلّقه على التقدير'
+  };
+  function refSideLabel(c) { return REF_SIDE[c.rule] || 'المرجع'; }
+  function docSideLabel(c) { return DOC_SIDE[c.rule] || 'سياستك'; }
+
+  function conflictTitle(c) {
+    if (c.rule === 'حدّي')  return 'قيمة تخالف المرجع: ' + c.quantity.docOrig + ' مقابل ' + c.quantity.refOrig;
+    if (c.rule === 'نطاق')  return 'نطاق أضيق من المرجع: ' + c.core;
+    if (c.rule === 'تعريف') return 'تعريف أضيق من المرجع: ' + c.core;
+    if (c.rule === 'تسلسل') return 'ترتيب مقلوب حول «' + c.core + '»';
+    if (c.rule === 'إفراغ') return 'التزام شامل صار تقديريًا: «' + c.core + '»';
+    return 'بند يخالف المرجع: ' + c.core;
+  }
+  function conflictDesc(c) {
+    if (c.rule === 'حدّي')
+      return c.why + ' — المرجع يشترط «' + c.quantity.refOrig +
+             '» وسياستك تنص على «' + c.quantity.docOrig + '».';
+    if (c.rule === 'نطاق')
+      return 'المرجع يُدخل «' + c.scope.refEntity + '» في النطاق، وسياستك تستثنيه — ' +
+             'فيسقط الالتزام عن هذه الطائفة كاملةً.';
+    if (c.rule === 'تعريف')
+      return 'المرجع يعمّم التعريف، وسياستك تقيّده بعتبة «' + c.definition.threshold +
+             '» — فكل بندٍ يستعمل المصطلح يضيق نطاقه تبعًا له.';
+    if (c.rule === 'تسلسل')
+      return 'المرجع يشترط الإجراء قبل «' + c.sequence.anchor + '»، وسياستك تجعله بعده — ' +
+             'فتتحول الرقابة السابقة إلى إخطارٍ لاحق.';
+    if (c.rule === 'إفراغ')
+      return 'المرجع يوجب الالتزام شمولًا، وسياستك تعلّقه على «' + c.hollowing.vagueTerm +
+             '» — فالبند حاضرٌ لفظًا غائبٌ حكمًا.';
+    return 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') + '.';
+  }
+
   function gapCard(doc, g) {
     var t = ST.taskOf(doc, g.code);
     var info = gapTypeInfo[g.type] || { icon: 'doc', label: g.type, desc: '' };
@@ -738,17 +784,18 @@
       return '<div class="fixcard' + (skipped ? ' off' : '') + '">' +
         '<div class="gap-head"><div><div class="gap-title">' + esc(c.core) + '</div>' +
         '<div class="gap-meta"><span class="code">' + c.code + '</span>' +
-        '<span class="gap-type">' + (c.rule === 'حدّي' ? esc(c.why) : 'منع مقابل فرض') +
-        ' · تطابق ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') + '</span></div></div>' +
+        '<span class="gap-type">' + esc(ruleLabel(c)) + (c.why ? ' — ' + esc(c.why) : '') +
+        ' · تطابق ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') +
+        (c.tentative ? ' · محتمل — يحتاج مراجعة' : '') + '</span></div></div>' +
         '<label class="tick"><input type="checkbox" data-skip="' + c.code + '"' + (skipped ? '' : ' checked') + '> تضمين</label></div>' +
         (c.rule === 'حدّي'
           ? '<div class="qcmp"><span class="q bad">' + esc(c.quantity.docOrig) + '</span>' +
             '<span class="qar">←</span><span class="q good">' + esc(c.quantity.refOrig) + '</span></div>'
           : '') +
-        '<div class="fixside"><div class="fs-lbl">' + (c.rule === 'حدّي' ? 'المرجع يشترط' : 'المرجع يمنع') + '</div>' +
+        '<div class="fixside"><div class="fs-lbl">' + esc(refSideLabel(c)) + '</div>' +
         '<button type="button" class="evidence" data-q="' + esc(c.refQuote) + '" data-src="ref">' +
         '<span class="lb">' + esc(c.refArticle || 'من المرجع') + '</span>«' + esc(c.refQuote) + '»</button></div>' +
-        '<div class="fixside"><div class="fs-lbl bad">' + (c.rule === 'حدّي' ? 'سياستك تنص على' : 'سياستك تفرض') + '</div>' +
+        '<div class="fixside"><div class="fs-lbl bad">' + esc(docSideLabel(c)) + '</div>' +
         '<button type="button" class="evidence" data-q="' + esc(c.docQuote) + '">' +
         '<span class="lb">' + esc(c.docArticle || 'من سياستك') + '</span>«' + esc(c.docQuote) + '»</button></div>' +
         '<div class="fixside"><div class="fs-lbl good">البند بعد التعديل — حرّره كما تشاء</div>' +

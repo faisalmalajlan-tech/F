@@ -242,9 +242,28 @@
     var nxt = norm[i + 1];
     return nxt === undefined || nxt === ' ';
   }
+  /* عنوان المادة يبدأ بندًا جديدًا وإن لم تنتهِ الفقرة قبله بنقطة —
+     والوثائق النظامية لا تُنهي عناوينها بنقطة أصلًا. بلا هذا الفاصل
+     تلتحم المواد ببعضها وبترويسة الوثيقة في جملة واحدة عملاقة، فيقصّها
+     حدُّ الطول عند رقمٍ أعمى في منتصف عبارة — رأينا «بما فيها» تُقطع
+     نصفين فاختفت مادة النطاق كلها عن الكشف. */
+  var ART_HEAD = /الماد[هة]\s*(?:\(\s*[^\)]{1,14}\s*\)|[^\s:،\.]{2,14}\s*:)/g;
+
+  function articleBreaks(norm) {
+    var at = {}, m;
+    ART_HEAD.lastIndex = 0;
+    while ((m = ART_HEAD.exec(norm))) if (m.index > 0) at[m.index] = 1;
+    return at;
+  }
+
   function splitSentences(norm) {
-    var out = [], start = 0, i;
+    var out = [], start = 0, i, heads = articleBreaks(norm);
     for (i = 0; i < norm.length; i++) {
+      if (heads[i] && i > start) {
+        var h = norm.slice(start, i).trim();
+        if (h.length > 12) out.push({ start: start, end: i, text: h });
+        start = i;
+      }
       if (isBreak(norm, i)) {
         var t = norm.slice(start, i + 1).trim();
         if (t.length > 12) out.push({ start: start, end: i + 1, text: t });

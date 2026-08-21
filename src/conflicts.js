@@ -79,7 +79,13 @@
      «لا تقل عن ١٢ شهراً» وسياستك «٦ أشهر». نستخرج المقدار واتجاه القيد،
      ثم نقارن. */
 
-  var DIR = { MAX: 'حد أعلى', MIN: 'حد أدنى', EXACT: 'قيمة محددة' };
+  /* GATE عتبةُ تعريف لا حدُّ التزام: «يُعد الإسناد جوهرياً إذا تجاوزت
+     قيمته مليونين» بوابةُ دخولٍ إلى النطاق. خفضُها يوسّع النطاق فيكون
+     أشدّ — عكس الحدّ تمامًا. لولا تمييزها لعُدّ كل تعريفٍ أوسع مخالفةً. */
+  var DIR = { MAX: 'حد أعلى', MIN: 'حد أدنى', EXACT: 'قيمة محددة', GATE: 'عتبة تعريف' };
+
+  /* «إذا تجاوزت/زادت/بلغت» تدل على بوابة لا على سقف */
+  var GATE_CUE = /(?:اذا|ان|متي)\s+(?:\S+\s+){0,2}(?:تجاوز|يتجاوز|تجاوزت|زاد|زادت|بلغ|بلغت|يزيد|تزيد|فاق|فاقت)/;
 
   function dirCues(raw) {
     return {
@@ -89,18 +95,29 @@
   }
 
   /* «كل» وحدها تبتلع «لكل عقد» و«الكلّ»، فلا تُقرأ دوريةً إلا ملاصقةً
-     لوحدة زمن: «كل ستة أشهر»، «كل سنة». */
-  var RECUR_KUL = /\bكل\s+(?:\S+\s+)?(?:ساع|يوم|اسبوع|شهر|سن|عام|ربع|نصف)/;
+     لوحدة زمن: «كل ستة أشهر»، «كل سنة».
+     الحدُّ يسبقها فراغًا أو بدايةَ نص — لا \b، فهو في JS معرَّفٌ على
+     [A-Za-z0-9_] ولا يقع بين حرفٍ عربي وفراغ، فيموت النمط صامتًا.
+     والوحدة تُذكر بجموعها: «ستة أشهر» لا يطابقها جذر «شهر» وحده. */
+  var UNIT = '(?:ساع|يوم|ايام|اسبوع|اسابيع|شهر|اشهر|شهور|سن|عام|اعوام|ربع|نصف)';
+  /* حتى كلمتان بين «كل» ووحدتها، ليسع العدد المركّب: «كل اثني عشر شهراً» */
+  var RECUR_KUL = new RegExp('(?:^|[\\s،؛\\(])كل\\s+(?:\\S+\\s+){0,2}' + UNIT);
 
-  function isRecurring(before, after, cues) {
+  /* «كل اثني عشر شهراً» تكتنف المقدارَ نفسه: «كل» قبله ووحدتُه بعده.
+     فحصُ النافذتين منفصلتين لا يراها أبدًا — لا بد من مقطعٍ يمتدّ عبر
+     المقدار. */
+  function isRecurring(before, after, span, cues) {
     return E.hasAny(before, cues.recur) || E.hasAny(after, cues.recur) ||
-           RECUR_KUL.test(before) || RECUR_KUL.test(after);
+           RECUR_KUL.test(span);
   }
 
   /* اتجاه القيد يُقرأ مما يسبق المقدار مباشرة */
-  function directionOf(norm, at, end, cues, kind) {
+  function directionOf(norm, at, end, cues, kind, isDef) {
     var before = norm.slice(Math.max(0, at - 34), at);
     var after = norm.slice(end, end + 22);
+
+    // في جملة تعريفٍ تكون العتبة بوابةَ نطاق لا سقفَ التزام
+    if (isDef && GATE_CUE.test(norm.slice(Math.max(0, at - 60), at))) return DIR.GATE;
 
     /* دورية التكرار تقلب المعنى: «مراجعة مرة واحدة سنوياً على الأقل» تعني
        أن الفاصل بين المراجعتين سنةٌ على الأكثر — فمراجعةٌ كل ستة أشهر
@@ -108,7 +125,8 @@
        على المدة نفسها فتخرج إيجابية كاذبة.
        والدورية وصفٌ للزمن وحده: مبلغٌ أو نسبةٌ لا يكونان فاصلًا بين مرّتين،
        فلا يقلبهما جوارُ لفظ التكرار. */
-    if (kind === 'مدة' && isRecurring(before, after, cues)) return DIR.MAX;
+    if (kind === 'مدة' &&
+        isRecurring(before, after, norm.slice(Math.max(0, at - 34), end + 22), cues)) return DIR.MAX;
 
     if (E.hasAny(before, cues.min)) return DIR.MIN;
     if (E.hasAny(before, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار
@@ -149,12 +167,12 @@
   }
 
   /* كل المقادير في نطاق جملة: مدة (بالساعات) أو مبلغ أو نسبة */
-  function quantities(norm, a, b, cues) {
+  function quantities(norm, a, b, cues, isDef) {
     var out = [], m;
     E.findDurations(norm).forEach(function (d) {
       if (d.s < a || d.e > b) return;
       out.push({ kind: 'مدة', base: d.days * 24, unit: 'ساعة',
-                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues, 'مدة') });
+                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues, 'مدة', isDef) });
     });
     var seg = norm.slice(a, b), mre = moneyRegex();
     mre.lastIndex = 0;
@@ -163,13 +181,13 @@
       if (val === null) continue;
       out.push({ kind: 'مبلغ', base: val, unit: 'عملة',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'مبلغ') });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'مبلغ', isDef) });
     }
     PCT_G.lastIndex = 0;
     while ((m = PCT_G.exec(seg))) {
       out.push({ kind: 'نسبة', base: parseFloat(m[1]), unit: '٪',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'نسبة') });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'نسبة', isDef) });
     }
     return out;
   }
@@ -180,7 +198,94 @@
     if (refQ.dir === DIR.MAX)   return d > r ? 'سياستك تتجاوز الحد الأعلى' : null;
     if (refQ.dir === DIR.MIN)   return d < r ? 'سياستك دون الحد الأدنى' : null;
     if (refQ.dir === DIR.EXACT) return d !== r ? 'القيمة تخالف المنصوص' : null;
+    /* البوابة تعمل بالمقلوب: عتبةٌ أعلى تُخرج حالاتٍ يشملها المرجع،
+       وأخفضُ منها يوسّع النطاق فيكون أشدّ لا مخالفًا. */
+    if (refQ.dir === DIR.GATE) return d > r ? 'عتبة تعريفك أعلى فتُخرج حالات يشملها المرجع' : null;
     return null;
+  }
+
+  /* ═══════════ ما بعد المقدار ═══════════
+     التعارض الحدّي يحتاج رقمين متقابلين، وتعارض الفعل يحتاج لفظ منعٍ
+     مقابل فرضٍ أو إباحة. وأخطر ما يمرّ بينهما تعارضٌ لا رقم فيه ولا لفظ
+     منع: نطاقٌ يُضيَّق، وتعريفٌ يُقيَّد، وترتيبٌ يُقلَب، والتزامٌ يبقى
+     لفظًا ويُفرَّغ حكمًا. القواعد الأربع التالية تغطيها. */
+
+  /* ما بعد لفظ الإدخال/الإخراج هو الجهة المقصودة. نقطعها عند أول فاصل
+     لأن «بما فيها الشركات التابعة، وتسري من تاريخه» جهةٌ واحدة لا اثنتان. */
+  function entityAfter(norm, terms) {
+    for (var i = 0; i < terms.length; i++) {
+      var at = norm.indexOf(terms[i]);
+      if (at < 0) continue;
+      var tail = norm.slice(at + terms[i].length, at + terms[i].length + 80);
+      var cut = tail.split(/[،؛\.\n]/)[0];
+      var ws = E.contentWords(cut);
+      if (ws.length) return { term: terms[i], words: ws, text: cut.trim() };
+    }
+    return null;
+  }
+
+  /* التداخل يُقاس على الأصغر: «الشركات التابعة» داخل «الشركات التابعة
+     والفروع الخارجية» هي الجهة نفسها. */
+  function overlap(a, b) {
+    if (!a.length || !b.length) return 0;
+    var hit = a.filter(function (w) { return b.indexOf(w) > -1; }).length;
+    return hit / Math.min(a.length, b.length);
+  }
+
+  /* المصطلح المعرَّف يقع بين لفظ التعريف وبداية جسم التعريف. نأخذه من
+     بين قوسي اقتباس إن وُجدا، وإلا فما قبل أداة الشرط أو الرابطة.
+     القطع لازم: بلا حدٍّ يبتلع المصطلحُ جسمَ التعريف كله، فيصير تعريفان
+     لمصطلحٍ واحد بلا تداخل — وهما في الحقيقة المصطلح نفسه. */
+  /* لا نستعمل \b هنا: حدُّ الكلمة في JS معرَّفٌ على [A-Za-z0-9_] وحدها،
+     فكل حرفٍ عربي «غير كلمة» عنده ولا يقع بينه وبين الفراغ حدّ — فالنمط
+     لا يطابق شيئًا أبدًا. النظرةُ الأمامية للفراغ تقوم مقامه. */
+  var DEF_STOP = /\s+(?:اذا|اذ|انه|بانه|هو|هي|كل|التي|الذي|ما|عندما|متي|حين|في حال|كلما)(?=\s|$)/;
+
+  function definedTerm(norm, markers) {
+    for (var i = 0; i < markers.length; i++) {
+      var at = norm.indexOf(markers[i]);
+      if (at < 0) continue;
+      var tail = norm.slice(at + markers[i].length, at + markers[i].length + 70);
+      var q = tail.match(/^\s*[«"']([^»"']{2,40})[»"']/);
+      var termText = q ? q[1] : tail.split(DEF_STOP)[0];
+      // المصطلح اسمٌ لا جملة: خمس كلمات سقفًا
+      var ws = E.contentWords(String(termText).split(/[،؛\.\n:]/)[0]).slice(0, 5);
+      if (ws.length) {
+        return { marker: markers[i], words: ws, at: at,
+                 body: norm.slice(at, at + 260) };
+      }
+    }
+    return null;
+  }
+
+  /* الترتيب: أقربُ مرساةٍ إلى لفظ «قبل» أو «بعد» هي التي يصفها. بلا هذا
+     القيد تلتقط جملةٌ فيها «قبل التوقيع» و«بعد الإصدار» ترتيبين متضاربين
+     من نفسها. */
+  /* «التوقيع» و«توقيع» مرساةٌ واحدة: بلا تجريد الألف واللام يخرج ترتيبان
+     مختلفان عن الحدث نفسه فلا يلتقيان أبدًا. */
+  var bareAnchor = function (a) { return a.replace(/^ال/, ''); };
+
+  function ordering(norm, seq) {
+    var best = null;
+    [['before', seq.before], ['after', seq.after]].forEach(function (pair) {
+      pair[1].forEach(function (rel) {
+        var from = 0, at;
+        while ((at = norm.indexOf(rel, from)) > -1) {
+          from = at + 1;
+          // «قبل ثلاثين يوماً من التوقيع» ترتيبٌ أيضًا، فنمدّ نافذة البحث
+          var win = norm.slice(at + rel.length, at + rel.length + 46);
+          seq.anchors.forEach(function (anc) {
+            var d = win.indexOf(anc);
+            if (d < 0) return;
+            if (!best || d < best.dist) {
+              best = { rel: pair[0], relTerm: rel,
+                       anchor: bareAnchor(anc), dist: d };
+            }
+          });
+        }
+      });
+    });
+    return best;
   }
 
   var fmtQ = function (q, norm) { return norm.slice(q.s, q.e).trim(); };
@@ -226,9 +331,18 @@
     var cues = dirCues(raw.conflict.direction);
     var out = [];
 
+    /* جملةُ التعريف تُعلَّم قبل القاعدة الحدّية: مقاديرها بوابات نطاق
+       لا حدود التزام، فتُقرأ بعكس اتجاهها. */
+    var DF = {
+      mk: E.normList(raw.conflict.definition.markers),
+      uni: E.normList(raw.conflict.definition.universals)
+    };
+    var rIsDef = rS.map(function (s) { return !!definedTerm(s.text, DF.mk); });
+    var dIsDef = dS.map(function (s) { return !!definedTerm(s.text, DF.mk); });
+
     /* ── القاعدة (ج): تعارض حدّي ── */
     rS.forEach(function (rs, ri) {
-      var refQs = quantities(rn.norm, rs.start, rs.end, cues);
+      var refQs = quantities(rn.norm, rs.start, rs.end, cues, rIsDef[ri]);
       if (!refQs.length) return;
       var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
       if (!need.length) return;
@@ -236,7 +350,7 @@
       dS.forEach(function (ds, di) {
         var score = topicScore(need, docSets[di], idf);
         if (score < minScore) return;
-        var docQs = quantities(dn.norm, ds.start, ds.end, cues);
+        var docQs = quantities(dn.norm, ds.start, ds.end, cues, dIsDef[di]);
         if (!docQs.length) return;
 
         /* الاقتران بالترتيب لا بالضرب الديكارتي: جملة تحمل «الإبلاغ خلال
@@ -311,10 +425,169 @@
       });
     });
 
-    // بند واحد قد يعارض عدة مواد — نُبقي أقوى تطابق لكل بند
+    /* ── القاعدة (د): تعارض النطاق ──
+       المرجع يُدخل جهةً في النطاق وسياستك تُخرجها. */
+    var SC = {
+      inc: E.normList(raw.conflict.scope.includes),
+      exc: E.normList(raw.conflict.scope.excludes)
+    };
+    rS.forEach(function (rs, ri) {
+      var rInc = entityAfter(rs.text, SC.inc);
+      if (!rInc) return;
+      var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+      if (!need.length) return;
+
+      dS.forEach(function (ds, di) {
+        var dExc = entityAfter(ds.text, SC.exc);
+        if (!dExc) return;
+        // الجهة نفسها لا جهة أخرى: «تُستثنى الفروع» لا تعارض «تشمل التابعة»
+        var ent = overlap(rInc.words, dExc.words);
+        if (ent < raw.conflict.scope.minEntityOverlap) return;
+        var score = topicScore(need, docSets[di], idf);
+        if (score < raw.conflict.scope.minTopicScore) return;
+
+        var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+        out.push({
+          rule: 'نطاق', kind: 'يشمله المرجع وسياستك تستثنيه',
+          why: 'المرجع يُدخل «' + rInc.text + '» في النطاق، وسياستك تُخرجه',
+          score: Math.round(Math.min(score, ent) * 100),
+          refQuote: refQ, refArticle: articleOf(refQ),
+          docQuote: docQ, docArticle: articleOf(docQ),
+          subject: dExc.text, core: dExc.text, amount: null, topic: need,
+          scope: { includeTerm: rInc.term, excludeTerm: dExc.term,
+                   entity: dExc.text, refEntity: rInc.text },
+          key: E.normStr(docQ).slice(0, 70) + '|نطاق'
+        });
+      });
+    });
+
+    /* ── القاعدة (هـ): تعارض التعريف ──
+       المصطلح نفسه معرَّفٌ في الوثيقتين تعريفين مختلفين. لا نرفع كل
+       اختلاف صياغة، بل الاختلاف الذي يُضيّق: المرجع يعمّم صراحةً
+       («بصرف النظر عن قيمته») وسياستك تقيّده بعتبة. */
+    rS.forEach(function (rs) {
+      var rDef = definedTerm(rs.text, DF.mk);
+      if (!rDef) return;
+      var refUniversal = E.hasAny(rDef.body, DF.uni);
+      if (!refUniversal) return;   // بلا تعميمٍ صريح لا نحكم على التضييق
+
+      dS.forEach(function (ds) {
+        var dDef = definedTerm(ds.text, DF.mk);
+        if (!dDef) return;
+        var term = overlap(rDef.words, dDef.words);
+        if (term < raw.conflict.definition.minTermOverlap) return;
+        // التضييق يظهر عتبةً: مقدارٌ في تعريف سياستك غائبٌ عن تعميم المرجع
+        var dq = quantities(dn.norm, ds.start, ds.end, cues);
+        if (!dq.length) return;
+        if (E.hasAny(dDef.body, DF.uni)) return;   // سياستك تعمّم أيضًا
+
+        var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+        var termTxt = rDef.words.join(' ');
+        out.push({
+          rule: 'تعريف', kind: 'تعريف أضيق مما في المرجع',
+          why: 'المرجع يعمّم التعريف، وسياستك تقيّده بعتبة ' + fmtQ(dq[0], dn.norm),
+          score: Math.round(term * 100),
+          refQuote: refQ, refArticle: articleOf(refQ),
+          docQuote: docQ, docArticle: articleOf(docQ),
+          subject: termTxt, core: termTxt, amount: null, topic: rDef.words,
+          definition: { term: termTxt, threshold: fmtQ(dq[0], dn.norm) },
+          key: E.normStr(docQ).slice(0, 70) + '|تعريف'
+        });
+      });
+    });
+
+    /* ── القاعدة (و): تعارض التسلسل ──
+       الإجراء نفسه والمرساة نفسها، والترتيب مقلوب: رقابةٌ كانت شرطًا
+       سابقًا صارت إخطارًا لاحقًا. */
+    var SQ = {
+      before: E.normList(raw.conflict.sequence.before),
+      after: E.normList(raw.conflict.sequence.after),
+      anchors: E.normList(raw.conflict.sequence.anchors)
+    };
+    rS.forEach(function (rs, ri) {
+      var rOrd = ordering(rs.text, SQ);
+      if (!rOrd || rOrd.rel !== 'before') return;   // التقديم وحده هو الضمانة
+      // الترتيب لا يُحتجّ به إلا إن كان المرجع يوجبه أو يمنعه
+      var rcSeq = classify(rs.text, C);
+      if (!rcSeq.requires && !rcSeq.prohibits) return;
+      var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+      if (!need.length) return;
+
+      dS.forEach(function (ds, di) {
+        var dOrd = ordering(ds.text, SQ);
+        if (!dOrd || dOrd.rel !== 'after') return;
+        if (dOrd.anchor !== rOrd.anchor) return;    // المرساة نفسها
+        /* الجذور المشتركة تُقاس بعددها لا بتغطيتها: البندان يتحدثان عن
+           العقد والإسناد والجهة الرقابية نفسها وإن اختلفت آليتهما. */
+        var shared = refSets[ri].filter(function (w) {
+          return docSets[di].indexOf(w) > -1;
+        }).length;
+        if (shared < raw.conflict.sequence.minSharedStems) return;
+        var score = topicScore(need, docSets[di], idf);
+
+        var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+        out.push({
+          rule: 'تسلسل', tentative: true, rank: shared,
+          kind: 'المرجع يوجبه قبل، وسياستك تجعله بعد',
+          why: 'المرجع يشترطه قبل «' + rOrd.anchor + '»، وسياستك تجعله بعده',
+          score: Math.round(score * 100),
+          refQuote: refQ, refArticle: articleOf(refQ),
+          docQuote: docQ, docArticle: articleOf(docQ),
+          subject: rOrd.anchor, core: rOrd.anchor, amount: null, topic: need,
+          sequence: { anchor: rOrd.anchor, refRel: rOrd.relTerm, docRel: dOrd.relTerm },
+          key: E.normStr(docQ).slice(0, 70) + '|تسلسل'
+        });
+      });
+    });
+
+    /* ── القاعدة (ز): الإفراغ بالغموض ──
+       البند حاضرٌ في سياستك لفظًا، لكنه معلَّق على تقديرٍ مطلق بعد أن كان
+       في المرجع شاملًا واجبًا. أخطر من الغياب: الغياب يُرى في الجرد،
+       وهذا يمرّ على أنه تغطية. */
+    var HV = E.normList(raw.conflict.hollowing.universals);
+    var vagueList = E.normList((raw.vague || []).map(function (v) { return v.term; }));
+    rS.forEach(function (rs, ri) {
+      var rc = classify(rs.text, C);
+      if (!rc.requires && !rc.prohibits) return;
+      if (!E.hasAny(rs.text, HV)) return;          // المرجع شامل صراحةً
+      if (E.hasAny(rs.text, vagueList)) return;    // مرجعٌ غامضٌ لا يُفرَّغ
+      var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+      if (!need.length) return;
+
+      dS.forEach(function (ds, di) {
+        var vague = E.hasAny(ds.text, vagueList);
+        if (!vague) return;
+        if (E.hasAny(ds.text, HV)) return;          // سياستك شاملة أيضًا
+        var shared = refSets[ri].filter(function (w) {
+          return docSets[di].indexOf(w) > -1;
+        }).length;
+        if (shared < raw.conflict.hollowing.minSharedStems) return;
+        var score = topicScore(need, docSets[di], idf);
+
+        var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+        out.push({
+          rule: 'إفراغ', rank: shared,
+          kind: 'التزام شامل في المرجع صار تقديريًا في سياستك',
+          why: 'المرجع يوجبه شمولًا، وسياستك تعلّقه على «' + vague + '»',
+          score: Math.round(score * 100),
+          refQuote: refQ, refArticle: articleOf(refQ),
+          docQuote: docQ, docArticle: articleOf(docQ),
+          subject: vague, core: vague, amount: null, topic: need,
+          hollowing: { vagueTerm: vague },
+          key: E.normStr(docQ).slice(0, 70) + '|إفراغ'
+        });
+      });
+    });
+
+    /* بند واحد قد يعارض عدة مواد — نُبقي أقوى تطابق لكل بند.
+       والقوة تُقاس بما استُدلّ به فعلًا: قاعدتا التسلسل والإفراغ تحكمان
+       بعدد الجذور المشتركة لا بتغطية أندر الكلمات، فترتيبُهما به. بلا
+       ذلك تُنسب المخالفة إلى مادةٍ مرجعية أخرى تصادف أن فيها اللفظ
+       نفسه — رأينا تعارض «عدم الممانعة» يُنسب إلى مادة خطة الخروج. */
+    var rankOf = function (c) { return c.rank !== undefined ? c.rank : c.score; };
     var best = {};
     out.forEach(function (c) {
-      if (!best[c.key] || c.score > best[c.key].score) best[c.key] = c;
+      if (!best[c.key] || rankOf(c) > rankOf(best[c.key])) best[c.key] = c;
     });
     var list = Object.keys(best).map(function (k) { return best[k]; })
                  .sort(function (a, b) { return b.score - a.score; });
@@ -351,6 +624,36 @@
       return art + ' (معدَّلة):\n' + c.docQuote.replace(/\s+/g, ' ').trim() +
         '\nعلى أن تكون القيمة «' + q.refOrig + '» بدلًا من «' + q.docOrig +
         '»، التزامًا بـ' + ref + '.';
+    }
+    /* لكل قاعدةٍ إصلاحُها: التعارض في النطاق يُصلَح بردّ الجهة المستثناة،
+       وفي التعريف بتبنّي تعريف المرجع، وفي التسلسل بإعادة الإجراء إلى
+       ما قبل الحدث، وفي الإفراغ بإزالة التقدير. صيغةٌ عامة واحدة تصلح
+       لجميعها تقول للمحرِّر أقلَّ مما يعرفه المحرك. */
+    if (c.rule === 'نطاق') {
+      return art + ' (معدَّلة):\n' +
+        c.docQuote.replace(/\s+/g, ' ').trim() +
+        '\nعلى أن يشمل النطاق «' + c.scope.refEntity + '» دون استثناء، التزامًا بـ' + ref + '.\n' +
+        '(حُذف استثناء «' + c.scope.entity + '».)';
+    }
+    if (c.rule === 'تعريف') {
+      return art + ' (معدَّلة):\n' +
+        'يُعتمد في تعريف «' + c.definition.term + '» ما ورد في ' + ref + ' دون تقييده بعتبة مالية.\n' +
+        '(أُلغيت عتبة «' + c.definition.threshold + '»، فالمرجع يعمّم التعريف بصرف النظر عن القيمة.)';
+    }
+    if (c.rule === 'تسلسل') {
+      return art + ' (معدَّلة):\n' +
+        c.docQuote.replace(/\s+/g, ' ').trim() +
+        '\nعلى أن يتم الإجراء المقرر في ' + ref + ' قبل «' + c.sequence.anchor + '» لا بعده.\n' +
+        '(الرقابة سابقة لا لاحقة — راجِع الصياغة قبل الاعتماد.)';
+    }
+    if (c.rule === 'إفراغ') {
+      /* لا نستبدل العبارة في النص: اللفظ المرصود مطبَّعٌ («عند الحاجه»)
+         والنص خام («عند الحاجة»)، فالاستبدال يخفق صامتًا ويخرج البند
+         كما هو موهمًا أنه عُدِّل. نذكرها في الملاحظة ليحذفها المحرِّر. */
+      return art + ' (معدَّلة):\n' +
+        c.docQuote.replace(/\s+/g, ' ').trim() +
+        '\nويكون الالتزام واجبًا في جميع الحالات دون تعليقٍ على التقدير، التزامًا بـ' + ref + '.\n' +
+        '(حُذفت عبارة «' + c.hollowing.vagueTerm + '» لأنها تُفرغ الالتزام.)';
     }
     if (c.kind.indexOf('تُجيزه') > -1) {
       return art + ' (معدَّلة):\n' +
