@@ -139,11 +139,15 @@
     var ci = S.cfg.conflict.impact;
     res.conflicts.forEach(function (c) {
       var risk = E.itemRisk(0.95, ci, null, S.cfg.scoring);
+      var isNum = c.rule === 'حدّي';
       res.gaps.unshift({
         code: c.code, key: 'تعارض|' + c.key, type: 'تعارض مع المرجع',
-        title: 'بند يخالف المرجع: ' + c.core,
-        description: 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') +
-                     '. تطابق الموضوع ' + c.score + '٪.',
+        title: isNum ? 'قيمة تخالف المرجع: ' + c.quantity.docOrig + ' مقابل ' + c.quantity.refOrig
+                     : 'بند يخالف المرجع: ' + c.core,
+        description: (isNum ? c.why + ' — المرجع يشترط «' + c.quantity.refOrig + '» وسياستك تنص على «' +
+                              c.quantity.docOrig + '».'
+                            : 'المرجع يمنع ما ينص عليه هذا البند' + (c.amount ? ' (' + c.amount + ')' : '') + '.') +
+                     ' تطابق الموضوع ' + c.score + '٪.',
         recommendation: 'أصدر البند المعدَّل والتعميم من صفحة «التعديلات».',
         evidence: c.docQuote, evidenceType: 'quote',
         probability: 0.95, impact: ci, decay: 1, risk: risk,
@@ -467,7 +471,8 @@
       var next = (r.preds || [])[0];
       return '<div class="doc-card">' +
         '<button class="doc-main" type="button" data-r="doc" data-id="' + d.id + '">' +
-        '<div class="doc-head"><div class="doc-name">' + esc(d.name) + '</div>' +
+        '<div class="doc-head"><div class="doc-name">' + esc(d.name) +
+        (d.isDraft ? ' <span class="vtag">مسودة معدّلة</span>' : '') + '</div>' +
         '<div class="doc-risk num" style="color:' + riskColor(r.effRisk || 0) + '">' + (r.effRisk || 0) + '</div></div>' +
         '<div class="doc-meta">' + open + ' فجوة مفتوحة' + (done ? ' · ' + done + ' مكتملة' : '') +
         (next ? ' · أقرب استحقاق خلال ' + next.daysRemaining + ' يومًا' : '') + '</div>' +
@@ -535,6 +540,22 @@
       '<div class="kpi" style="cursor:default"><div class="v" style="color:' + (over ? 'var(--danger)' : 'var(--success)') + '">' + over + '</div>' +
         '<div class="l">موعد متجاوز</div><div class="s">' + r.preds.length + ' موعد قادم</div></div>' +
       '</div>';
+
+    if (doc.origin) {
+      var parent = ST.get(doc.parentId);
+      html += '<div class="card"><div class="sectitle">أصل هذه النسخة</div>' +
+        '<div style="font-size:12px;line-height:2;color:var(--text2);font-weight:300">' +
+        'نسخة ' + (doc.version || 2) + '، أُنشئت من ' +
+        (parent ? '«' + esc(parent.name) + '» (' + esc(doc.origin.from) + ')' : esc(doc.origin.from)) +
+        ' بتعديل ' + doc.origin.applied + ' بندًا متعارضًا.<br>' +
+        'التعارضات المتبقية: <b style="color:' + (r.conflicts.length ? 'var(--danger)' : 'var(--success)') +
+        '">' + r.conflicts.length + '</b>' +
+        (parent ? ' · خطر الأصل ' + (parent.lastRisk || '—') + ' · خطر هذه النسخة ' + r.effRisk : '') +
+        '</div>' +
+        (parent ? '<div style="margin-top:12px"><button class="btn ghost sm" data-r="doc" data-id="' +
+                  parent.id + '">افتح النسخة الأصلية</button></div>' : '') +
+        '<div class="note">مسودة معدَّلة آليًا — تُراجَع قانونيًا قبل اعتمادها رسميًا.</div></div>';
+    }
 
     html += '<div class="card"><div class="sectitle">الخلاصة</div>' +
       '<div style="font-size:13px;line-height:2.15;color:var(--text2);font-weight:300">' + esc(summary(r)) + '</div></div>';
@@ -669,8 +690,10 @@
     }
     if (!r.conflicts.length) {
       body.innerHTML = '<div class="card"><div class="empty">' +
-        'لم نجد بندًا في هذا المستند يفعل ما يمنعه المرجع.<br>' +
-        'يُرصد التعارض حين يمنع المرجعُ شيئًا وتفرضه سياستك في الموضوع نفسه.</div></div>';
+        'لم نجد في هذا المستند ما يخالف المرجع.<br><br>' +
+        'يُرصد التعارض في ثلاث حالات: أن يمنع المرجعُ شيئًا وتفعله سياستك، ' +
+        'أو يوجبه ويمنعه سياستك، أو أن تخالف قيمةٌ في سياستك حدًّا في المرجع ' +
+        '(مدةً أو مبلغًا أو نسبة).</div></div>';
       return;
     }
 
@@ -696,12 +719,17 @@
       return '<div class="fixcard' + (skipped ? ' off' : '') + '">' +
         '<div class="gap-head"><div><div class="gap-title">' + esc(c.core) + '</div>' +
         '<div class="gap-meta"><span class="code">' + c.code + '</span>' +
-        '<span class="gap-type">تطابق الموضوع ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') + '</span></div></div>' +
+        '<span class="gap-type">' + (c.rule === 'حدّي' ? esc(c.why) : 'منع مقابل فرض') +
+        ' · تطابق ' + c.score + '٪' + (c.amount ? ' · ' + esc(c.amount) : '') + '</span></div></div>' +
         '<label class="tick"><input type="checkbox" data-skip="' + c.code + '"' + (skipped ? '' : ' checked') + '> تضمين</label></div>' +
-        '<div class="fixside"><div class="fs-lbl">المرجع يمنع</div>' +
+        (c.rule === 'حدّي'
+          ? '<div class="qcmp"><span class="q bad">' + esc(c.quantity.docOrig) + '</span>' +
+            '<span class="qar">←</span><span class="q good">' + esc(c.quantity.refOrig) + '</span></div>'
+          : '') +
+        '<div class="fixside"><div class="fs-lbl">' + (c.rule === 'حدّي' ? 'المرجع يشترط' : 'المرجع يمنع') + '</div>' +
         '<button type="button" class="evidence" data-q="' + esc(c.refQuote) + '" data-src="ref">' +
         '<span class="lb">' + esc(c.refArticle || 'من المرجع') + '</span>«' + esc(c.refQuote) + '»</button></div>' +
-        '<div class="fixside"><div class="fs-lbl bad">سياستك تفرض</div>' +
+        '<div class="fixside"><div class="fs-lbl bad">' + (c.rule === 'حدّي' ? 'سياستك تنص على' : 'سياستك تفرض') + '</div>' +
         '<button type="button" class="evidence" data-q="' + esc(c.docQuote) + '">' +
         '<span class="lb">' + esc(c.docArticle || 'من سياستك') + '</span>«' + esc(c.docQuote) + '»</button></div>' +
         '<div class="fixside"><div class="fs-lbl good">البند بعد التعديل — حرّره كما تشاء</div>' +
@@ -710,7 +738,8 @@
         esc((v.edits || {})[c.code] || CF.proposeClause(c, v)) + '</textarea></div></div>';
     }).join('');
 
-    html += '<div class="row-btns"><button class="btn" id="fxCirc">تنزيل التعميم</button>' +
+    html += '<div class="row-btns"><button class="btn" id="fxApply">اعتمد النسخة المعدّلة وأعد تحليلها</button></div>' +
+      '<div class="row-btns"><button class="btn ghost" id="fxCirc">تنزيل التعميم</button>' +
       '<button class="btn ghost" id="fxPol">تنزيل السياسة المعدّلة</button></div><div id="fxMsg"></div>';
     body.innerHTML = html; wire(body);
 
@@ -757,6 +786,40 @@
                title: 'إصدار مسودة تعميم', detail: list.length + ' بندًا · ' + doc.name });
       $('fxMsg').innerHTML = '<div class="okbox">نُزّلت مسودة التعميم — راجعها واعتمدها قبل الإصدار.</div>';
     });
+    /* إغلاق الحلقة: يُعاد إدخال النسخة المعدّلة إلى النظام كنسخة جديدة،
+       فتُحلَّل بالمعايير نفسها ويُتحقَّق أن التعارض زال فعلًا لا ظنًّا. */
+    $('fxApply').addEventListener('click', function () {
+      var nv = persist(), list = chosen(nv);
+      if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }
+      var built = CF.buildAmendedPolicy(doc.text, list, nv, true);
+      if (!built.applied) {
+        $('fxMsg').innerHTML = '<div class="errbox">تعذّر تطبيق أي تعديل — تأكد أن نص البند لم يُغيَّر.</div>';
+        return;
+      }
+      var beforeRisk = r.effRisk, beforeConf = r.conflicts.length;
+      var code = AU.nextCode('NR');
+      var saved = ST.add({
+        name: doc.name + ' — نسخة ' + ((doc.version || 1) + 1),
+        text: built.text, refText: doc.refText, refName: doc.refName,
+        docType: doc.docType, caseCode: code,
+        version: (doc.version || 1) + 1, parentId: doc.id, isDraft: true,
+        origin: { from: doc.caseCode, applied: built.applied, at: Date.now() }
+      });
+      refreshAll();
+      var after = S.analyses[saved.doc.id] || {};
+      var afterConf = (after.conflicts || []).length;
+      AU.log({ kind: 'data', actor: S.session.name, code: code,
+        title: 'اعتماد نسخة معدّلة', code2: doc.caseCode,
+        detail: doc.name + ' · عُدِّل ' + built.applied + ' بندًا · التعارضات ' +
+                beforeConf + ' ← ' + afterConf + ' · الخطر ' + beforeRisk + ' ← ' + (after.effRisk || 0) });
+      S.banner = afterConf === 0
+        ? { msg: 'اعتُمدت النسخة وأُعيد تحليلها: زالت كل التعارضات (' + beforeConf + ' ← 0)، ' +
+                 'والخطر ' + beforeRisk + ' ← ' + (after.effRisk || 0) + '.' }
+        : { bad: true, msg: 'اعتُمدت النسخة، لكن بقي ' + afterConf + ' تعارضًا من ' + beforeConf +
+                 ' — راجع البنود التي لم تُضمَّن.' };
+      go('doc', saved.doc.id);
+    });
+
     $('fxPol').addEventListener('click', function () {
       var nv = persist(), list = chosen(nv);
       if (!list.length) { $('fxMsg').innerHTML = '<div class="errbox">لم تُضمّن أي بند.</div>'; return; }

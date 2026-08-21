@@ -154,11 +154,17 @@
       'ثلاثة':3,'ثلاث':3,'أربعة':4,'أربع':4,'خمسة':5,'خمس':5,'ستة':6,'ست':6,'سبعة':7,'سبع':7,
       'ثمانية':8,'ثماني':8,'تسعة':9,'تسع':9,'عشرة':10,'عشر':10,'خمسة عشر':15,'خمسة عشرة':15,
       'عشرين':20,'عشرون':20,'ثلاثين':30,'ثلاثون':30,'أربعين':40,'أربعون':40,'خمسين':50,'خمسون':50,
-      'ستين':60,'ستون':60,'سبعين':70,'ثمانين':80,'تسعين':90,'تسعون':90,'مائة':100,'مئة':100,'مائتين':200 };
+      'ستين':60,'ستون':60,'سبعين':70,'ثمانين':80,'تسعين':90,'تسعون':90,'مائة':100,'مئة':100,'مائتين':200,
+      // العشرات المركّبة شائعة في النصوص النظامية: «خلال أربع وعشرين ساعة»
+      'أحد عشر':11,'إحدى عشرة':11,'اثني عشر':12,'اثنا عشر':12,'اثنتي عشرة':12,'اثنتا عشرة':12,
+      'ثلاثة عشر':13,'أربعة عشر':14,'ستة عشر':16,'سبعة عشر':17,'ثمانية عشر':18,'تسعة عشر':19,
+      'أربع وعشرين':24,'أربعة وعشرين':24,'ثمان وأربعين':48,'ثمانية وأربعين':48,
+      'اثنتين وسبعين':72,'اثنين وسبعين':72,'ست وثلاثين':36,'تسعين يوماً':90 };
     Object.keys(raw).forEach(function (k) { NUM_WORDS[normStr(k)] = raw[k]; });
   })();
 
   var UNITS = [
+    { terms: normList(['ساعة','ساعه','ساعات','ساعةً']), days: 1 / 24 },
     { terms: normList(['يوم','يوماً','يوما','أيام','ايام','يومًا']), days: 1 },
     { terms: normList(['أسبوع','اسبوع','أسابيع','اسابيع','أسبوعاً','اسبوعا']), days: 7 },
     { terms: normList(['شهر','شهراً','شهرا','أشهر','اشهر','شهور']), days: 30 },
@@ -174,17 +180,43 @@
         while ((m = re.exec(norm))) {
           var at = m.index + m[1].length;
           var before = norm.slice(Math.max(0, at - 40), at);
-          var n = null;
-          var dm = before.match(/(\d{1,4})\s*\)?\s*$/);            // رقم مباشر أو داخل قوسين
-          if (dm) n = +dm[1];
+          var n = null, numLen = 0, numGap = 0;
+          var dm = before.match(/(\d{1,4})(\s*\)?\s*)$/);          // رقم مباشر أو داخل قوسين
+          if (dm) { n = +dm[1]; numLen = dm[1].length; numGap = dm[2].length; }
           if (n === null) {
             var keys = Object.keys(NUM_WORDS).sort(function (a, b) { return b.length - a.length; });
             for (var i = 0; i < keys.length; i++) {
-              if (before.slice(-keys[i].length - 12).indexOf(keys[i]) > -1) { n = NUM_WORDS[keys[i]]; break; }
+              var tailWin = before.slice(-keys[i].length - 12);
+              var kAt = tailWin.indexOf(keys[i]);
+              if (kAt > -1) {
+                n = NUM_WORDS[keys[i]]; numLen = keys[i].length;
+                numGap = tailWin.length - kAt - keys[i].length;
+                break;
+              }
             }
           }
           if (n === null || n <= 0 || n > 3650) continue;
-          out.push({ at: at, days: n * u.days, raw: norm.slice(Math.max(0, at - 24), at + term.length).trim() });
+          // نطاق دقيق يبدأ من الرقم وينتهي بالوحدة — يسمح باستبدال «٥ أيام»
+          // بـ«٢٤ ساعة» داخل جملة المستخدم نفسها بدل إعادة صياغتها.
+          var numStart = at;
+          if (numLen) numStart = at - numGap - numLen;
+          // «ثلاثين (30) يوماً»: نبدأ من اللفظ لا من الرقم بين قوسين،
+          // حتى لا يخرج نطاقٌ يقطع القوس فيفسد الاستبدال.
+          var pre = norm.slice(Math.max(0, numStart - 26), numStart);
+          var wm = pre.match(/([\u0621-\u064A]+(?: [\u0621-\u064A]+)?)(\s*\()$/);
+          if (wm) {
+            // الالتقاط جشع فيبتلع الكلمة السابقة («خلال ثلاثين»)، فنجرّب
+            // العبارة كاملة ثم آخر كلمة فيها.
+            var cand = [wm[1], wm[1].split(' ').pop()];
+            for (var ci = 0; ci < cand.length; ci++) {
+              if (NUM_WORDS[cand[ci]] !== undefined) {
+                numStart = numStart - wm[2].length - cand[ci].length;
+                break;
+              }
+            }
+          }
+          out.push({ at: at, days: n * u.days, s: Math.max(0, numStart), e: at + term.length,
+                     raw: norm.slice(Math.max(0, numStart), at + term.length).trim() });
         }
       });
     });
@@ -831,6 +863,7 @@
   return {
     analyze: analyze, locateQuote: locateQuote, normStr: normStr, normMap: normMap,
     findDates: findDates, findDurations: findDurations, splitSentences: splitSentences,
+    NUM_WORDS: NUM_WORDS,
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,

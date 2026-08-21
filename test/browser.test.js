@@ -152,6 +152,24 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(pol2.indexOf('لا تُفرض أي رسوم أو عمولات') > -1, 'السياسة المعدّلة تحمل البند الجديد');
   ok(pol2.indexOf('المادة الأولى') > -1, 'بقية بنود السياسة سليمة');
 
+  console.log('\n— إغلاق الحلقة: يصلح ثم يعيد التحليل ويتحقق —');
+  await nav('docs'); await page.click('.doc-main'); await page.waitForTimeout(400);
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(450);
+  const confBefore = await page.locator('.fixcard').count();
+  await page.fill('#fxRef', 'تعليمات الرسوم'); await page.fill('#fxEff', '2026-09-01');
+  await page.waitForTimeout(250);
+  await page.click('#fxApply'); await page.waitForTimeout(1400);
+  const bannerTxt = await page.locator('#pageContent .okbox, #pageContent .errbox').first().textContent();
+  ok(/زالت كل التعارضات/.test(bannerTxt), 'التحقق بعد إعادة التحليل: ' + bannerTxt.trim().slice(0, 78));
+  ok((await page.locator('.pagetitle').first().textContent()).indexOf('نسخة 2') > -1, 'أُنشئت نسخة ٢ باسم مشتق');
+  const originTxt = await page.locator('#tabBody').textContent();
+  ok(/أصل هذه النسخة/.test(originTxt), 'بطاقة أصل النسخة معروضة');
+  ok(/التعارضات المتبقية/.test(originTxt), 'تعرض التعارضات المتبقية');
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(400);
+  ok((await page.locator('.fixcard').count()) === 0, 'النسخة الجديدة خالية من التعارض (' + confBefore + ' ← 0)');
+  await nav('docs');
+  ok((await page.locator('.vtag').count()) === 1, 'النسخة موسومة «مسودة معدّلة» في القائمة');
+
   console.log('\n— الداشبورد التنفيذي —');
   await nav('home');
   const home = await page.locator('#pageContent').textContent();
@@ -166,9 +184,9 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   console.log('\n— مستند ثالث والمحفظة —');
   await nav('docs'); await addDoc('عقد تشغيل', PROC.replace('2026/01/15', '2026/03/20'));
   await nav('home');
-  ok((await page.locator('#pageContent').textContent()).indexOf('3 مستند') > -1, 'الرئيسية تجمع المستندات الثلاثة');
+  ok((await page.locator('#pageContent').textContent()).indexOf('4 مستند') > -1, 'الرئيسية تجمع كل المستندات');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 3, 'ثلاثة مستندات محفوظة');
+  ok((await page.locator('.doc-card').count()) === 4, 'أربعة مستندات محفوظة (منها نسخة معدّلة)');
 
   console.log('\n— المدير —');
   await page.click('#burgerBtn'); await page.waitForTimeout(140);
@@ -177,7 +195,7 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok((await page.locator('#userRole').textContent()) === 'مدير النظام', 'دخول المدير');
   ok((await navCount()) === 6, 'المدير يرى ٦ صفحات');
   await nav('docs');
-  ok((await page.locator('.doc-card').count()) === 3, 'المستندات باقية بعد تبديل المستخدم');
+  ok((await page.locator('.doc-card').count()) === 4, 'المستندات باقية بعد تبديل المستخدم');
   await nav('admin');
   await page.fill('#addDeontic', 'تختص'); await page.click('[data-add="addDeontic"]'); await page.waitForTimeout(300);
   await page.click('#cfgSave'); await page.waitForTimeout(500);

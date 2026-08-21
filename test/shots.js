@@ -29,6 +29,12 @@ const P = f => fs.readFileSync(path.resolve(__dirname, '../samples/' + f), 'utf8
   await page.fill('#fxRef', 'تعليمات الرسوم والعمولات'); await page.fill('#fxDays', '30');
   await page.waitForTimeout(400);
   await page.screenshot({ path: 'dist/shot-fix.png' });
+  // التعارض الحدّي في الزوج الأمني
+  await nav('docs'); await page.click('.doc-main'); await page.waitForTimeout(420);
+  await page.click('[data-tab="fix"]'); await page.waitForTimeout(450);
+  await page.evaluate(() => window.scrollTo(0, 420)); await page.waitForTimeout(200);
+  await page.screenshot({ path: 'dist/shot-threshold.png' });
+  await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(150);
 
   // نزرع أسبوعًا من التاريخ ليظهر منحنى الخطر
   await page.evaluate(() => {

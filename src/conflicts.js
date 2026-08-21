@@ -68,6 +68,95 @@
     return word ? 'المادة ' + word[1].trim() : null;
   }
 
+  /* ═══════════ التعارض الحدّي ═══════════
+     أشيع تعارض في الواقع ليس «ممنوع مقابل مفروض»، بل رقمان متعارضان على
+     الموضوع نفسه: المرجع «خلال ٢٤ ساعة» وسياستك «خلال ٥ أيام»، أو المرجع
+     «لا تقل عن ١٢ شهراً» وسياستك «٦ أشهر». نستخرج المقدار واتجاه القيد،
+     ثم نقارن. */
+
+  var DIR = { MAX: 'حد أعلى', MIN: 'حد أدنى', EXACT: 'قيمة محددة' };
+
+  function dirCues(raw) {
+    return {
+      max: E.normList(raw.max), min: E.normList(raw.min), notice: E.normList(raw.notice)
+    };
+  }
+
+  /* اتجاه القيد يُقرأ مما يسبق المقدار مباشرة */
+  function directionOf(norm, at, cues) {
+    var win = norm.slice(Math.max(0, at - 34), at);
+    if (E.hasAny(win, cues.min)) return DIR.MIN;
+    if (E.hasAny(win, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار = حد أدنى
+    if (E.hasAny(win, cues.max)) return DIR.MAX;
+    return DIR.EXACT;
+  }
+
+  var PCT_G = /(\d[\d\.]*)\s*(?:٪|%)/g;
+
+  /* المبالغ تُكتب بالرقم («25 ريالاً») وبالحرف («عشرة ريالات»)، والثانية
+     شائعة في النصوص النظامية. بلا دعمها يمرّ سقف الرسوم بلا كشف. */
+  var MONEY_RE = null;
+  function moneyRegex() {
+    if (MONEY_RE) return MONEY_RE;
+    var words = Object.keys(E.NUM_WORDS)
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+    // «ريالات» قبل «ريال»: البدائل تُجرَّب بالترتيب، فالأقصر يبتلع الأطول.
+    MONEY_RE = new RegExp('(\\d[\\d,\\.]*|' + words.join('|') +
+      ')\\s*(ريالات|ريالاً|ريالا|ريال|ر\\.س|sar|دراهم|درهم|دولارات|دولار)', 'g');
+    return MONEY_RE;
+  }
+  function moneyValue(tok) {
+    var n = parseFloat(String(tok).replace(/,/g, ''));
+    if (isFinite(n)) return n;
+    return E.NUM_WORDS[tok] !== undefined ? E.NUM_WORDS[tok] : null;
+  }
+
+  /* كل المقادير في نطاق جملة: مدة (بالساعات) أو مبلغ أو نسبة */
+  function quantities(norm, a, b, cues) {
+    var out = [], m;
+    E.findDurations(norm).forEach(function (d) {
+      if (d.s < a || d.e > b) return;
+      out.push({ kind: 'مدة', base: d.days * 24, unit: 'ساعة',
+                 s: d.s, e: d.e, dir: directionOf(norm, d.s, cues) });
+    });
+    var seg = norm.slice(a, b), mre = moneyRegex();
+    mre.lastIndex = 0;
+    while ((m = mre.exec(seg))) {
+      var val = moneyValue(m[1]);
+      if (val === null) continue;
+      out.push({ kind: 'مبلغ', base: val, unit: 'عملة',
+                 s: a + m.index, e: a + m.index + m[0].length,
+                 dir: directionOf(norm, a + m.index, cues) });
+    }
+    PCT_G.lastIndex = 0;
+    while ((m = PCT_G.exec(seg))) {
+      out.push({ kind: 'نسبة', base: parseFloat(m[1]), unit: '٪',
+                 s: a + m.index, e: a + m.index + m[0].length,
+                 dir: directionOf(norm, a + m.index, cues) });
+    }
+    return out;
+  }
+
+  /* هل قيمة سياستك تخالف قيد المرجع؟ */
+  function violates(refQ, docQ) {
+    var r = refQ.base, d = docQ.base;
+    if (refQ.dir === DIR.MAX)   return d > r ? 'سياستك تتجاوز الحد الأعلى' : null;
+    if (refQ.dir === DIR.MIN)   return d < r ? 'سياستك دون الحد الأدنى' : null;
+    if (refQ.dir === DIR.EXACT) return d !== r ? 'القيمة تخالف المنصوص' : null;
+    return null;
+  }
+
+  var fmtQ = function (q, norm) { return norm.slice(q.s, q.e).trim(); };
+
+  /* التطبيع يحذف التشكيل، فالخريطة تقف عند آخر حرف أصلي وتترك «ً» خارجه.
+     نمدّ المقطع ليشمل ما يلحقه من تشكيل حتى يخرج «يوماً» لا «يوما». */
+  function origSpan(text, map, s0, e0) {
+    var a = map[s0], b = map[Math.min(e0, map.length) - 1] + 1;
+    while (b < text.length && /[\u064B-\u0652\u0640]/.test(text[b])) b++;
+    return text.slice(a, b);
+  }
+
   function detect(opts) {
     var raw = cfgOf(opts.config);
     var C = {
@@ -97,7 +186,60 @@
 
     var docSets = dS.map(function (s) { return E.contentWords(s.text); });
     var docCls = dS.map(function (s) { return classify(s.text, C); });
+    var cues = dirCues(raw.conflict.direction);
     var out = [];
+
+    /* ── القاعدة (ج): تعارض حدّي ── */
+    rS.forEach(function (rs, ri) {
+      var refQs = quantities(rn.norm, rs.start, rs.end, cues);
+      if (!refQs.length) return;
+      var need = refSets[ri].slice().sort(function (a, b) { return idf(b) - idf(a); }).slice(0, TOPK);
+      if (!need.length) return;
+
+      dS.forEach(function (ds, di) {
+        var score = topicScore(need, docSets[di], idf);
+        if (score < minScore) return;
+        var docQs = quantities(dn.norm, ds.start, ds.end, cues);
+        if (!docQs.length) return;
+
+        /* الاقتران بالترتيب لا بالضرب الديكارتي: جملة تحمل «الإبلاغ خلال
+           ٢٤ ساعة وتقديم التقرير خلال ٥ أيام» يجب أن تُقارن الأولى بالأولى
+           والثانية بالثانية — وإلا قُورن التقرير بمهلة الإبلاغ فخرج تعارض
+           وهمي. */
+        var byKind = function (list, k) { return list.filter(function (q) { return q.kind === k; }); };
+        var pairs = [];
+        ['مدة', 'مبلغ', 'نسبة'].forEach(function (k) {
+          var rs2 = byKind(refQs, k), ds2 = byKind(docQs, k);
+          for (var i = 0; i < Math.min(rs2.length, ds2.length); i++) pairs.push([rs2[i], ds2[i]]);
+        });
+        pairs.forEach(function (pr) {
+          var rq = pr[0], dq = pr[1];
+          (function () {
+            var why = violates(rq, dq);
+            if (!why) return;
+            var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
+            out.push({
+              rule: 'حدّي', kind: 'قيمة تخالف حدًّا في المرجع', why: why,
+              score: Math.round(score * 100),
+              refQuote: refQ, refArticle: articleOf(refQ),
+              docQuote: docQ, docArticle: articleOf(docQ),
+              subject: fmtQ(dq, dn.norm), core: need.slice(0, 3).join(' '),
+              amount: null, topic: need,
+              quantity: {
+                kind: rq.kind, dir: rq.dir,
+                refText: fmtQ(rq, rn.norm), docText: fmtQ(dq, dn.norm),
+                refBase: rq.base, docBase: dq.base,
+                docOrig: origSpan(opts.docText, dn.map, dq.s, dq.e),
+                refOrig: origSpan(opts.refText, rn.map, rq.s, rq.e),
+                docShow: origSpan(opts.docText, dn.map, dq.s, dq.e).replace(/\s+/g, ' '),
+                refShow: origSpan(opts.refText, rn.map, rq.s, rq.e).replace(/\s+/g, ' ')
+              },
+              key: E.normStr(docQ).slice(0, 70) + '|' + dq.s
+            });
+          })();
+        });
+      });
+    });
 
     rS.forEach(function (rs, ri) {
       var rc = classify(rs.text, C);
@@ -111,13 +253,17 @@
         var kind = (rc.prohibits && dc.imposes) ? 'يمنعه المرجع وسياستك تفرضه'
                  : (rc.requires && dc.prohibits) ? 'يوجبه المرجع وسياستك تمنعه' : null;
         if (!kind) return;
+        /* بندٌ يمنع شيئًا قد يكون تنفيذًا للمتطلب لا مخالفةً له («لا يجوز
+           التعاقد قبل تقييم المخاطر» ينفّذ متطلبَ التقييم). فنرفع عتبته
+           ونعلّمه «محتمل» ليراجعه الإنسان بدل أن يُعدَّل تلقائيًا. */
+        var tentative = kind.indexOf('تمنعه') > -1;
         var score = topicScore(need, docSets[di], idf);
-        if (score < minScore) return;
+        if (score < (tentative ? raw.conflict.minTopicScoreTentative : minScore)) return;
 
         var refQ = quote(rn.map, opts.refText, rs), docQ = quote(dn.map, opts.docText, ds);
         var subject = subjectOf(docQ), amount = amountOf(docQ);
         out.push({
-          kind: kind, score: Math.round(score * 100),
+          rule: 'فعل', kind: kind, tentative: tentative, score: Math.round(score * 100),
           refQuote: refQ, refArticle: articleOf(refQ),
           docQuote: docQ, docArticle: articleOf(docQ),
           subject: subject, core: coreOf(subject), amount: amount,
@@ -136,7 +282,14 @@
                  .sort(function (a, b) { return b.score - a.score; });
 
     var fp = E.normStr(opts.docText).slice(0, 40000);
-    list.forEach(function (c) { c.code = E.makeCode('CF', fp, c.key); });
+    var seen = {};
+    list.forEach(function (c) {
+      var code = E.makeCode('CF', fp, c.key);
+      // تصادم في اختصار البصمة ممكن؛ نفكّه بلاحقة ثابتة الترتيب
+      if (seen[code] !== undefined) { seen[code]++; code = code + '-' + seen[code]; }
+      else seen[code] = 0;
+      c.code = code;
+    });
     return { conflicts: list };
   }
 
@@ -145,6 +298,22 @@
     var v = vars || {};
     var ref = (c.refArticle ? c.refArticle + ' من ' : '') + (v.refName || 'المرجع التنظيمي');
     var art = c.docArticle || 'هذا البند';
+
+    /* التعارض الحدّي يُصلَح بأدق تدخّل ممكن: استبدال المقدار داخل جملتك
+       نفسها. يبقى النص بأسلوبك، ولا نعيد صياغة ما لم يُطلب تغييره. */
+    if (c.rule === 'حدّي') {
+      var q = c.quantity;
+      var body = c.docQuote.indexOf(q.docOrig) > -1
+        ? c.docQuote.replace(q.docOrig, q.refOrig)
+        : null;
+      if (body) {
+        return art + ' (معدَّلة):\n' + body.replace(/\s+/g, ' ').trim() +
+          '\n(عُدِّل «' + q.docOrig + '» إلى «' + q.refOrig + '» التزامًا بـ' + ref + '.)';
+      }
+      return art + ' (معدَّلة):\n' + c.docQuote.replace(/\s+/g, ' ').trim() +
+        '\nعلى أن تكون القيمة «' + q.refOrig + '» بدلًا من «' + q.docOrig +
+        '»، التزامًا بـ' + ref + '.';
+    }
     if (c.kind.indexOf('تفرضه') > -1) {
       return art + ' (معدَّلة):\n' +
         'لا تُفرض أي رسوم أو عمولات أو مقابل مالي على ' + c.core + '، ' +
@@ -167,7 +336,9 @@
     var eff = v.effectiveDate || '[تاريخ النفاذ]';
     var owner = v.owner || '[الإدارة المختصة]';
     var days = v.days || '30';
-    var subject = conflicts.length === 1 ? conflicts[0].core : 'بنود السياسة المخالفة للمرجع التنظيمي';
+    var subject = conflicts.length === 1
+      ? (conflicts[0].rule === 'حدّي' ? 'قيمة مخالفة للمرجع التنظيمي' : conflicts[0].core)
+      : 'بنود السياسة المخالفة للمرجع التنظيمي';
 
     var t = '';
     t += '⚠ مسودة — لم تُعتمد بعد. تُراجَع قانونيًا وتُعتمد قبل الإصدار.\n';
@@ -197,7 +368,10 @@
     t += 'يُعمَّم على جميع القطاعات والفروع ما يلي:\n\n';
     var n = 1;
     conflicts.forEach(function (c) {
-      if (c.kind.indexOf('تفرضه') > -1) {
+      if (c.rule === 'حدّي') {
+        t += (n++) + '. تُعدَّل «' + c.quantity.docOrig + '» إلى «' + c.quantity.refOrig + '» في ' +
+             (c.docArticle || 'البند المشار إليه') + '، اعتبارًا من ' + eff + '.\n';
+      } else if (c.kind.indexOf('تفرضه') > -1) {
         t += (n++) + '. يُوقف فورًا تحصيل ' + c.subject +
              (c.amount ? ' البالغة ' + c.amount : '') + '، وتُعدّ ملغاة اعتبارًا من ' + eff + '.\n';
       } else {
@@ -222,7 +396,7 @@
   }
 
   /* ═══ السياسة كاملة بعد استبدال البنود المتعارضة ═══ */
-  function buildAmendedPolicy(docText, conflicts, vars) {
+  function buildAmendedPolicy(docText, conflicts, vars, bare) {
     var v = vars || {}, out = docText, applied = 0;
     conflicts.forEach(function (c) {
       if (c.skip) return;
@@ -232,6 +406,9 @@
       out = out.slice(0, idx) + body + out.slice(idx + c.docQuote.length);
       applied++;
     });
+    // bare: نصٌّ بلا ترويسة، لإعادة تحميله في النظام وتحليله دون أن
+    // تدخل كلماتُ الترويسة في التحليل.
+    if (bare) return { text: out, applied: applied };
     var head = '⚠ مسودة معدَّلة — لم تُعتمد بعد. تُراجَع قانونيًا قبل الإصدار.\n' +
       'أُنشئت بواسطة نذير في ' + new Date().toISOString().slice(0, 10) +
       ' · عُدِّل ' + applied + ' من ' + conflicts.length + ' بندًا متعارضًا.\n' +

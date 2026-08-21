@@ -419,3 +419,12 @@ details.why .mathbox{margin-top:4px;border-top:none;padding-top:8px}
 .tick{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--text3);white-space:nowrap;cursor:pointer}
 .tick input{accent-color:var(--gold);width:14px;height:14px}
 @media(max-width:520px){.fixgrid{grid-template-columns:1fr}}
+
+/* مقارنة القيمتين في التعارض الحدّي */
+.qcmp{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.qcmp .q{font-size:14px;font-weight:400;padding:7px 14px;border:1px solid;border-radius:2px;font-variant-numeric:tabular-nums}
+.qcmp .q.bad{color:var(--danger);border-color:rgba(255,107,122,.4);background:rgba(255,107,122,.06)}
+.qcmp .q.good{color:var(--success);border-color:rgba(95,211,168,.4);background:rgba(95,211,168,.06)}
+.qcmp .qar{color:var(--text3);font-size:15px}
+.vtag{font-size:9px;color:var(--gold);border:1px solid rgba(216,190,134,.32);border-radius:2px;
+  padding:2px 7px;letter-spacing:.05em;vertical-align:middle;font-weight:400}

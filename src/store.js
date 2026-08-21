@@ -47,6 +47,9 @@
       refName: doc.refName || '', docType: doc.docType || 'فحص كل البنود',
       context: doc.context || '',
       caseCode: doc.caseCode || '', fp: doc.fp || '',
+      version: doc.version || 1, parentId: doc.parentId || null,
+      origin: doc.origin || null,          // من أين جاءت هذه النسخة
+      isDraft: !!doc.isDraft,
       truncated: (doc.text || '').length > MAX_TEXT,
       history: [], tasks: {}
     };
