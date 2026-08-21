@@ -342,6 +342,18 @@
 
     var html = banner();
 
+    /* عتبات الجوهرية غير مضبوطة ⇒ كل غرامة تُقاس على أرقامٍ افتراضية
+       لا تخصّ هذه الجهة. تنبيهٌ صريح خيرٌ من درجةٍ تبدو موثوقة وليست. */
+    var mat = (S.cfg.scoring || {}).materiality;
+    if (mat && !mat.calibrated) {
+      html += '<div class="calib">' + ico('shield', 14) +
+        '<div><b>عتبات الجوهرية لم تُضبط بعد.</b> جسامة الغرامات تُقاس الآن ' +
+        'على أرقامٍ افتراضية (' + money(mat.bands[0].upTo) + ' فأقلّ = منخفض جدًا، ' +
+        'أكثر من ' + money(mat.bands[mat.bands.length - 2].upTo) + ' = مرتفع جدًا). ' +
+        'لا معيار عالمي لهذه العتبات — تختلف بحجم الجهة. ' +
+        '<button type="button" class="lnk" data-r="admin">اضبطها من إعدادات المحرك</button></div></div>';
+    }
+
     /* ١ — الحالة: مؤشر قوسي بدل رقمٍ مجرّد، ومنحنى المحفظة بجانبه */
     var series = portfolioSeries();
     html += '<div class="risk-hero"><div class="top">' +

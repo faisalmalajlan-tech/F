@@ -309,7 +309,9 @@
       prohibitive: normList((cfg.conflict && cfg.conflict.prohibitions) || []),
       parties: normList(cfg.parties || []),
       penaltyTiers: (cfg.penaltyTiers || []).map(function (t) {
-        return { label: t.label, impact: +t.impact, terms: normList(t.terms || []) };
+        // monetary لازم هنا: إسقاطه يجعل كل جزاء غير ماليّ فلا يُقرأ مبلغه
+        return { label: t.label, impact: +t.impact, monetary: !!t.monetary,
+                 terms: normList(t.terms || []) };
       }),
       noPenaltyImpact: +cfg.noPenaltyImpact,
       noPenaltyLabel: cfg.noPenaltyLabel,
@@ -352,14 +354,18 @@
       if (hit) {
         var t = C.penaltyTiers[i];
         var cap = findCap(normSentence);
-        return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
+        /* ذكرُ مبلغٍ لا يرفع الجسامة بذاته — كان يرفعها إلى ٠٫٨٥ فيقفز
+           «إنذار برسم ٥٠ ريالًا» إلى مرتبة الغرامة الكبرى. الجسامة
+           تُقرأ من المبلغ نفسه لاحقًا عبر عتبات الجوهرية. */
+        return { impact: t.impact, monetary: !!t.monetary,
                  label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') +
                         (cap ? ' · سقف ' + (cap.kind === 'مبلغ' ? cap.amount.toLocaleString('en-US') : cap.percent + '٪') : '') + ')'
                         : t.label,
                  amount: amount, currency: money ? money[2] : null, perDay: perDay, cap: cap };
       }
     }
-    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false, cap: null };
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null,
+             currency: null, perDay: false, cap: null, monetary: false };
   }
 
   /* ═══════════ أكواد التتبّع ═══════════ */
@@ -421,6 +427,20 @@
   /* ── مستوى NIST من قيمةٍ بين صفر وواحد ──
      المدى في جدول D-3: 0-4 منخفض جدًا · 5-20 منخفض · 21-79 متوسط ·
      80-95 مرتفع · 96-100 مرتفع جدًا. */
+  /* ── جسامة المبلغ من عتبات الجوهرية ──
+     ٥٠٠ ريال و٥٠٠ ألف ليستا سواء، وكانتا تُعطيان الأثر نفسه (٠٫٨٥)
+     لأن الجزاء يُقرأ بلفظه لا بمقداره. العتبات تُضبط لكل جهة — ولا
+     معيار عالمي لها، فNIST نفسه يترك تعريف «الجسيم» للجهة. */
+  function moneyImpact(value, sc) {
+    var M = SC(sc).materiality;
+    if (!M || !M.bands || value === null || value === undefined) return null;
+    for (var i = 0; i < M.bands.length; i++) {
+      var b = M.bands[i];
+      if (b.upTo === null || b.upTo === undefined || value <= b.upTo) return b.impact;
+    }
+    return M.bands[M.bands.length - 1].impact;
+  }
+
   function nistBand(v01, sc) {
     var N = SC(sc).nist, pct = clamp(v01, 0, 1) * 100, i, id, L;
     for (i = N.order.length - 1; i >= 0; i--) {
@@ -641,7 +661,8 @@
       var generalPenalty = false;
       if (pen.impact <= C.noPenaltyImpact && docPenalty) {
         pen = { impact: Math.max(C.noPenaltyImpact, docPenalty.impact * 0.85),
-                label: 'جزاء عام: ' + docPenalty.label, amount: null, currency: null, perDay: false, cap: null };
+                label: 'جزاء عام: ' + docPenalty.label, amount: null, currency: null,
+                perDay: false, cap: null, monetary: false };
         generalPenalty = true;
       }
       var party = hasAny(s.text, C.parties);
@@ -652,7 +673,7 @@
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
         penaltyAmount: pen.amount, penaltyCurrency: pen.currency, penaltyPerDay: pen.perDay,
-        penaltyCap: pen.cap, generalPenalty: generalPenalty,
+        penaltyCap: pen.cap, generalPenalty: generalPenalty, penaltyMonetary: pen.monetary,
         probability: probFromDays(days, sc),
         risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
@@ -686,6 +707,19 @@
           o.exposure = raw;
         }
         o.exposureAccruing = o.daysRemaining < 0;
+      }
+
+      /* الجسامة تُقرأ من المقدار متى وُجد. نقيسها على التعرّض الكامل لا
+         على الرقم المفرد: غرامةٌ يومية ٥٠٠ ريال مستمرةٌ منذ سنة تعرّضٌ
+         قدره ١٨٢٥٠٠ — وقياسها بالـ٥٠٠ يُهوّنها. والجزاء غير المالي
+         (فسخ، سحب ترخيص) لا يخفضه مبلغٌ صغير يرافقه، فنأخذ الأعلى. */
+      var basis = o.exposure !== null && o.exposure !== undefined ? o.exposure : o.penaltyAmount;
+      var mi = moneyImpact(basis, sc);
+      if (mi !== null) {
+        o.impact = o.penaltyMonetary ? mi : Math.max(o.impact, mi);
+        o.impactBasis = basis;
+        o.risk = itemRisk(o.probability, o.impact, o.daysRemaining, sc);
+        o.severity = sevFromRisk(o.risk, sc);
       }
       o.key = normStr(o.quote).slice(0, 70);
       o.index = i;
@@ -913,7 +947,7 @@
     NUM_WORDS: NUM_WORDS,
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
-    nistRisk: nistRisk, nistBand: nistBand,
+    nistRisk: nistRisk, nistBand: nistBand, moneyImpact: moneyImpact,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
     makeCode: makeCode, shortHash: shortHash, compile: compile,
     stem: stem, contentWords: contentWords, normList: normList, hasAny: hasAny

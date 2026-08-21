@@ -548,6 +548,15 @@ details.tabletoggle summary{font-size:9.5px;color:var(--text3);cursor:pointer;ma
 details.tabletoggle summary::-webkit-details-marker{display:none}
 details.tabletoggle summary:before{content:'⌄ ';color:var(--gold)}
 details.tabletoggle[open] summary:before{content:'⌃ '}
+
+/* تنبيه معايرة العتبات — درجةٌ مبنية على أرقامٍ افتراضية تبدو موثوقة وليست */
+.calib{display:flex;gap:10px;align-items:flex-start;background:rgba(242,153,74,.07);
+  border:1px solid rgba(242,153,74,.28);border-radius:3px;padding:12px 14px;margin-bottom:14px;
+  font-size:11.5px;color:var(--text2);line-height:1.85;font-weight:300}
+.calib svg{color:var(--warning);flex-shrink:0;margin-top:2px}
+.calib b{color:var(--warning);font-weight:600}
+.calib .lnk{background:none;border:none;color:var(--gold2);cursor:pointer;font-size:11.5px;
+  text-decoration:underline;padding:0;font-family:inherit}
 </style>
 </head>
 <body>
@@ -658,12 +667,16 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
       'صاحب الترخيص','المرخص له','المستأجر','المؤجر','الشركة','الموظف','البائع','المشتري'],
 
     /* درجات الجزاء — تُفحص بالترتيب، وأول تطابق يحدد الأثر */
+    /* monetary: هل جسامةُ هذا الجزاء يحدّدها مبلغه؟
+       الغرامة نعم — ٥٠٠ ريال ليست كـ٥٠٠ ألف. أما فسخُ العقد فجسامته
+       في ذاته لا في رقمٍ يرافقه، فلا يخفضه مبلغٌ صغير. */
     penaltyTiers: [
-      { id:'t1', label:'إنهاء أو سحب',   impact:1.00, terms:['فسخ','إلغاء العقد','إنهاء العقد','سحب الترخيص','إلغاء الترخيص','شطب','إيقاف النشاط','الحرمان من'] },
-      { id:'t2', label:'غرامة محددة',    impact:0.85, terms:['غرامة قدرها','غرامة مقدارها','شرط جزائي','غرامة تأخير','غرامة يومية'] },
-      { id:'t3', label:'غرامة أو تعويض', impact:0.70, terms:['غرامة','جزاء','جزائية','تعويض','مخالفة','عقوبة','مساءلة','خصم'] },
-      { id:'t4', label:'إنذار',          impact:0.40, terms:['إنذار','لفت نظر','تنبيه','ملاحظة كتابية'] }
+      { id:'t1', label:'إنهاء أو سحب',   impact:1.00, monetary:false, terms:['فسخ','إلغاء العقد','إنهاء العقد','سحب الترخيص','إلغاء الترخيص','شطب','إيقاف النشاط','الحرمان من'] },
+      { id:'t2', label:'غرامة محددة',    impact:0.85, monetary:true,  terms:['غرامة قدرها','غرامة مقدارها','شرط جزائي','غرامة تأخير','غرامة يومية'] },
+      { id:'t3', label:'غرامة أو تعويض', impact:0.70, monetary:true,  terms:['غرامة','جزاء','جزائية','تعويض','مخالفة','عقوبة','مساءلة','خصم'] },
+      { id:'t4', label:'إنذار',          impact:0.40, monetary:false, terms:['إنذار','لفت نظر','تنبيه','ملاحظة كتابية'] }
     ],
+
     noPenaltyImpact: 0.35,
     noPenaltyLabel: 'لا جزاء منصوص عليه',
 
@@ -872,6 +885,25 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
           low:      ['veryLow', 'low',     'low',      'low',      'moderate'],
           veryLow:  ['veryLow', 'veryLow', 'veryLow',  'veryLow',  'low'     ]
         }
+      },
+
+      /* ═══ عتبات الجوهرية ═══
+         سؤالٌ لا يجيبه أي معيار عالمي: متى يصير المبلغ جسيمًا؟ الجواب
+         يختلف بحجم الجهة اختلافًا جذريًا — ٥٠٠ ألف ريال كارثةٌ لمنشأة
+         صغيرة وبندٌ هامشي لبنكٍ كبير. وNIST نفسه يعرّف الأثر وصفًا
+         («أثر جسيم أو كارثي») ويترك تحديدَه للجهة.
+         القيم أدناه **نقطة بداية لا معيار**، اضبطها من «إعدادات المحرك».
+         ونسب الأثر مُنزَّلة على مستويات NIST الخمسة لتقع في مداها. */
+      materiality: {
+        currency: 'ريال',
+        calibrated: false,          // تصير true متى ضبطتها الجهة
+        bands: [
+          { upTo: 1000,      impact: 0.02, label: 'منخفض جدًا' },
+          { upTo: 50000,     impact: 0.12, label: 'منخفض'      },
+          { upTo: 500000,    impact: 0.50, label: 'متوسط'      },
+          { upTo: 5000000,   impact: 0.88, label: 'مرتفع'      },
+          { upTo: null,      impact: 0.98, label: 'مرتفع جدًا' }
+        ]
       },
 
       probability: { overdue:0.95, d7:0.75, d30:0.55, d90:0.35, far:0.20, none:0.50 },
@@ -1257,7 +1289,9 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
       prohibitive: normList((cfg.conflict && cfg.conflict.prohibitions) || []),
       parties: normList(cfg.parties || []),
       penaltyTiers: (cfg.penaltyTiers || []).map(function (t) {
-        return { label: t.label, impact: +t.impact, terms: normList(t.terms || []) };
+        // monetary لازم هنا: إسقاطه يجعل كل جزاء غير ماليّ فلا يُقرأ مبلغه
+        return { label: t.label, impact: +t.impact, monetary: !!t.monetary,
+                 terms: normList(t.terms || []) };
       }),
       noPenaltyImpact: +cfg.noPenaltyImpact,
       noPenaltyLabel: cfg.noPenaltyLabel,
@@ -1300,14 +1334,18 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
       if (hit) {
         var t = C.penaltyTiers[i];
         var cap = findCap(normSentence);
-        return { impact: money && t.impact < 0.85 ? 0.85 : t.impact,
+        /* ذكرُ مبلغٍ لا يرفع الجسامة بذاته — كان يرفعها إلى ٠٫٨٥ فيقفز
+           «إنذار برسم ٥٠ ريالًا» إلى مرتبة الغرامة الكبرى. الجسامة
+           تُقرأ من المبلغ نفسه لاحقًا عبر عتبات الجوهرية. */
+        return { impact: t.impact, monetary: !!t.monetary,
                  label: money ? t.label + ' (' + money[0].trim() + (perDay ? ' يوميًا' : '') +
                         (cap ? ' · سقف ' + (cap.kind === 'مبلغ' ? cap.amount.toLocaleString('en-US') : cap.percent + '٪') : '') + ')'
                         : t.label,
                  amount: amount, currency: money ? money[2] : null, perDay: perDay, cap: cap };
       }
     }
-    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null, currency: null, perDay: false, cap: null };
+    return { impact: C.noPenaltyImpact, label: C.noPenaltyLabel, amount: null,
+             currency: null, perDay: false, cap: null, monetary: false };
   }
 
   /* ═══════════ أكواد التتبّع ═══════════ */
@@ -1369,6 +1407,20 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
   /* ── مستوى NIST من قيمةٍ بين صفر وواحد ──
      المدى في جدول D-3: 0-4 منخفض جدًا · 5-20 منخفض · 21-79 متوسط ·
      80-95 مرتفع · 96-100 مرتفع جدًا. */
+  /* ── جسامة المبلغ من عتبات الجوهرية ──
+     ٥٠٠ ريال و٥٠٠ ألف ليستا سواء، وكانتا تُعطيان الأثر نفسه (٠٫٨٥)
+     لأن الجزاء يُقرأ بلفظه لا بمقداره. العتبات تُضبط لكل جهة — ولا
+     معيار عالمي لها، فNIST نفسه يترك تعريف «الجسيم» للجهة. */
+  function moneyImpact(value, sc) {
+    var M = SC(sc).materiality;
+    if (!M || !M.bands || value === null || value === undefined) return null;
+    for (var i = 0; i < M.bands.length; i++) {
+      var b = M.bands[i];
+      if (b.upTo === null || b.upTo === undefined || value <= b.upTo) return b.impact;
+    }
+    return M.bands[M.bands.length - 1].impact;
+  }
+
   function nistBand(v01, sc) {
     var N = SC(sc).nist, pct = clamp(v01, 0, 1) * 100, i, id, L;
     for (i = N.order.length - 1; i >= 0; i--) {
@@ -1589,7 +1641,8 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
       var generalPenalty = false;
       if (pen.impact <= C.noPenaltyImpact && docPenalty) {
         pen = { impact: Math.max(C.noPenaltyImpact, docPenalty.impact * 0.85),
-                label: 'جزاء عام: ' + docPenalty.label, amount: null, currency: null, perDay: false, cap: null };
+                label: 'جزاء عام: ' + docPenalty.label, amount: null, currency: null,
+                perDay: false, cap: null, monetary: false };
         generalPenalty = true;
       }
       var party = hasAny(s.text, C.parties);
@@ -1600,7 +1653,7 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
         daysRemaining: days, urgency: urgencyLabel(days),
         penalty: pen.label, impact: pen.impact,
         penaltyAmount: pen.amount, penaltyCurrency: pen.currency, penaltyPerDay: pen.perDay,
-        penaltyCap: pen.cap, generalPenalty: generalPenalty,
+        penaltyCap: pen.cap, generalPenalty: generalPenalty, penaltyMonetary: pen.monetary,
         probability: probFromDays(days, sc),
         risk: itemRisk(probFromDays(days, sc), pen.impact, days, sc),
         focused: focus.length ? focus.some(function (f) { return s.text.indexOf(f) > -1; }) : false,
@@ -1634,6 +1687,19 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
           o.exposure = raw;
         }
         o.exposureAccruing = o.daysRemaining < 0;
+      }
+
+      /* الجسامة تُقرأ من المقدار متى وُجد. نقيسها على التعرّض الكامل لا
+         على الرقم المفرد: غرامةٌ يومية ٥٠٠ ريال مستمرةٌ منذ سنة تعرّضٌ
+         قدره ١٨٢٥٠٠ — وقياسها بالـ٥٠٠ يُهوّنها. والجزاء غير المالي
+         (فسخ، سحب ترخيص) لا يخفضه مبلغٌ صغير يرافقه، فنأخذ الأعلى. */
+      var basis = o.exposure !== null && o.exposure !== undefined ? o.exposure : o.penaltyAmount;
+      var mi = moneyImpact(basis, sc);
+      if (mi !== null) {
+        o.impact = o.penaltyMonetary ? mi : Math.max(o.impact, mi);
+        o.impactBasis = basis;
+        o.risk = itemRisk(o.probability, o.impact, o.daysRemaining, sc);
+        o.severity = sevFromRisk(o.risk, sc);
       }
       o.key = normStr(o.quote).slice(0, 70);
       o.index = i;
@@ -1861,7 +1927,7 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
     NUM_WORDS: NUM_WORDS,
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
     timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
-    nistRisk: nistRisk, nistBand: nistBand,
+    nistRisk: nistRisk, nistBand: nistBand, moneyImpact: moneyImpact,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
     makeCode: makeCode, shortHash: shortHash, compile: compile,
     stem: stem, contentWords: contentWords, normList: normList, hasAny: hasAny
@@ -3211,6 +3277,18 @@ details.tabletoggle[open] summary:before{content:'⌃ '}
     moves.sort(function (a, b) { return b.d.diff - a.d.diff; });
 
     var html = banner();
+
+    /* عتبات الجوهرية غير مضبوطة ⇒ كل غرامة تُقاس على أرقامٍ افتراضية
+       لا تخصّ هذه الجهة. تنبيهٌ صريح خيرٌ من درجةٍ تبدو موثوقة وليست. */
+    var mat = (S.cfg.scoring || {}).materiality;
+    if (mat && !mat.calibrated) {
+      html += '<div class="calib">' + ico('shield', 14) +
+        '<div><b>عتبات الجوهرية لم تُضبط بعد.</b> جسامة الغرامات تُقاس الآن ' +
+        'على أرقامٍ افتراضية (' + money(mat.bands[0].upTo) + ' فأقلّ = منخفض جدًا، ' +
+        'أكثر من ' + money(mat.bands[mat.bands.length - 2].upTo) + ' = مرتفع جدًا). ' +
+        'لا معيار عالمي لهذه العتبات — تختلف بحجم الجهة. ' +
+        '<button type="button" class="lnk" data-r="admin">اضبطها من إعدادات المحرك</button></div></div>';
+    }
 
     /* ١ — الحالة: مؤشر قوسي بدل رقمٍ مجرّد، ومنحنى المحفظة بجانبه */
     var series = portfolioSeries();
