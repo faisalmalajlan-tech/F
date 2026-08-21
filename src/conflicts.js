@@ -88,16 +88,27 @@
     };
   }
 
+  /* «كل» وحدها تبتلع «لكل عقد» و«الكلّ»، فلا تُقرأ دوريةً إلا ملاصقةً
+     لوحدة زمن: «كل ستة أشهر»، «كل سنة». */
+  var RECUR_KUL = /\bكل\s+(?:\S+\s+)?(?:ساع|يوم|اسبوع|شهر|سن|عام|ربع|نصف)/;
+
+  function isRecurring(before, after, cues) {
+    return E.hasAny(before, cues.recur) || E.hasAny(after, cues.recur) ||
+           RECUR_KUL.test(before) || RECUR_KUL.test(after);
+  }
+
   /* اتجاه القيد يُقرأ مما يسبق المقدار مباشرة */
-  function directionOf(norm, at, end, cues) {
+  function directionOf(norm, at, end, cues, kind) {
     var before = norm.slice(Math.max(0, at - 34), at);
     var after = norm.slice(end, end + 22);
 
     /* دورية التكرار تقلب المعنى: «مراجعة مرة واحدة سنوياً على الأقل» تعني
        أن الفاصل بين المراجعتين سنةٌ على الأكثر — فمراجعةٌ كل ستة أشهر
        التزامٌ لا مخالفة. بلا هذا الاستثناء يُقرأ «على الأقل» حدًّا أدنى
-       على المدة نفسها فتخرج إيجابية كاذبة. */
-    if (E.hasAny(before, cues.recur) || E.hasAny(after, cues.recur)) return DIR.MAX;
+       على المدة نفسها فتخرج إيجابية كاذبة.
+       والدورية وصفٌ للزمن وحده: مبلغٌ أو نسبةٌ لا يكونان فاصلًا بين مرّتين،
+       فلا يقلبهما جوارُ لفظ التكرار. */
+    if (kind === 'مدة' && isRecurring(before, after, cues)) return DIR.MAX;
 
     if (E.hasAny(before, cues.min)) return DIR.MIN;
     if (E.hasAny(before, cues.notice)) return DIR.MIN;   // «قبل ثلاثين يوماً» مهلة إشعار
@@ -105,6 +116,14 @@
     // الإشارة قد تلحق المقدار: «خلال ثلاثين يوماً كحد أقصى»
     if (E.hasAny(after, cues.min)) return DIR.MIN;
     if (E.hasAny(after, cues.max)) return DIR.MAX;
+
+    /* قد يفصل بين الإشارة ومقدارها وصفٌ طويل: «لا يقل الضمان البنكي
+       المطلوب من مزود الخدمة عن 100000 ريال». النافذة الضيقة تفوّته،
+       فنوسّعها بعد أن تخيب — والضيقة تُفحص أولًا حتى لا يسرق مقدارٌ
+       إشارةَ مقدارٍ قبله في الجملة نفسها. */
+    var wide = norm.slice(Math.max(0, at - 90), at);
+    if (E.hasAny(wide, cues.min)) return DIR.MIN;
+    if (E.hasAny(wide, cues.max)) return DIR.MAX;
     return DIR.EXACT;
   }
 
@@ -135,7 +154,7 @@
     E.findDurations(norm).forEach(function (d) {
       if (d.s < a || d.e > b) return;
       out.push({ kind: 'مدة', base: d.days * 24, unit: 'ساعة',
-                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues) });
+                 s: d.s, e: d.e, dir: directionOf(norm, d.s, d.e, cues, 'مدة') });
     });
     var seg = norm.slice(a, b), mre = moneyRegex();
     mre.lastIndex = 0;
@@ -144,13 +163,13 @@
       if (val === null) continue;
       out.push({ kind: 'مبلغ', base: val, unit: 'عملة',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'مبلغ') });
     }
     PCT_G.lastIndex = 0;
     while ((m = PCT_G.exec(seg))) {
       out.push({ kind: 'نسبة', base: parseFloat(m[1]), unit: '٪',
                  s: a + m.index, e: a + m.index + m[0].length,
-                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues) });
+                 dir: directionOf(norm, a + m.index, a + m.index + m[0].length, cues, 'نسبة') });
     }
     return out;
   }
