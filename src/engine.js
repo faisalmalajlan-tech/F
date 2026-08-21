@@ -283,24 +283,38 @@
   /* ═══════════ ٨. حساب الخطر ═══════════ */
 
   function SC(sc) { return sc || NC.DEFAULTS.scoring; }
+
+  /* المنحنى متصل لا درجي: القيم المضبوطة في الإعدادات هي نقاط ارتساء،
+     وما بينها يُستكمل خطيًا. بدون هذا يبقى الخطر ساكنًا أسابيع ثم يقفز
+     دفعة واحدة عند حدٍّ ما — والواقع أن اقتراب الموعد يزيد الخطر كل يوم. */
+  function curve(d, anchors) {
+    var i;
+    for (i = 0; i < anchors.length - 1; i++) {
+      var hi = anchors[i], lo = anchors[i + 1];       // hi.day > lo.day
+      if (d >= lo.day && d <= hi.day) {
+        var span = hi.day - lo.day;
+        if (span <= 0) return lo.v;
+        var t = (d - lo.day) / span;                  // 0 عند lo، 1 عند hi
+        return lo.v + (hi.v - lo.v) * t;
+      }
+    }
+    return d > anchors[0].day ? anchors[0].v : anchors[anchors.length - 1].v;
+  }
+
   function timeDecay(d, sc) {
     var k = SC(sc).decay;
     if (d === null || d === undefined) return 1.0;
-    if (d < 0)  return k.overdue;
-    if (d < 7)  return k.d7;
-    if (d < 14) return k.d14;
-    if (d < 30) return k.d30;
-    if (d < 90) return k.d90;
-    return k.far;
+    // كلما طال التجاوز زاد الخطر، بسقف عند ضعف قيمة التجاوز
+    if (d < 0) return Math.min(k.overdue * 2, k.overdue * (1 + Math.min(-d, 180) / 360));
+    return curve(d, [{ day: 90, v: k.d90 }, { day: 30, v: k.d30 },
+                     { day: 14, v: k.d14 }, { day: 7, v: k.d7 }, { day: 0, v: k.overdue }]);
   }
   function probFromDays(d, sc) {
     var k = SC(sc).probability;
     if (d === null || d === undefined) return k.none;   // غياب الموعد نفسه سببٌ للتأخر
-    if (d < 0)  return k.overdue;
-    if (d < 7)  return k.d7;
-    if (d < 30) return k.d30;
-    if (d < 90) return k.d90;
-    return k.far;
+    if (d < 0) return k.overdue;
+    return curve(d, [{ day: 90, v: k.d90 }, { day: 30, v: k.d30 },
+                     { day: 7, v: k.d7 }, { day: 0, v: k.overdue }]);
   }
   function urgencyLabel(d) {
     if (d === null || d === undefined) return 'غير مؤرّخ';
@@ -577,8 +591,15 @@
     var stats = { critical: 0, medium: 0, low: 0 };
     gaps.forEach(function (g) { stats[g.severity]++; });
 
-    var riskScore = aggregateRisk(gaps.map(function (g) { return g.risk; })
-                      .concat(preds.map(function (p) { return p.risk; })), sc);
+    var allRisks = gaps.map(function (g) { return g.risk; })
+                     .concat(preds.map(function (p) { return p.risk; }));
+    var riskScore = aggregateRisk(allRisks, sc);
+    // القيمة غير المدوَّرة تُحفظ في تاريخ المستند، فيظهر منحنى الخطر متصلًا
+    // بدل أن تبتلع التقريبُ حركةَ يومٍ واحد.
+    var riskExact = allRisks.length
+      ? Math.max.apply(null, allRisks) * sc.aggregate.maxWeight +
+        Math.sqrt(allRisks.reduce(function (a, x) { return a + x * x; }, 0) / allRisks.length) * sc.aggregate.rmsWeight
+      : 0;
 
     /* أكواد تتبّع ثابتة — نفس البند يحمل نفس الكود في كل تحليل لاحق.
        أي تصادم متبقٍ يُفَك بلاحقة ترتيبية، وهي ثابتة ما دام النص ثابتًا. */
@@ -602,7 +623,7 @@
     preds.forEach(function (p) { p.code = makeCode('DL', fp, p.obKey); });
 
     return {
-      riskScore: riskScore, stats: stats, gaps: gaps, preds: preds,
+      riskScore: riskScore, riskExact: riskExact, stats: stats, gaps: gaps, preds: preds,
       obligations: obligations.sort(function (a, b) {
         var x = a.daysRemaining === null ? 1e9 : a.daysRemaining;
         var y = b.daysRemaining === null ? 1e9 : b.daysRemaining;
@@ -642,7 +663,7 @@
     analyze: analyze, locateQuote: locateQuote, normStr: normStr, normMap: normMap,
     findDates: findDates, findDurations: findDurations, splitSentences: splitSentences,
     hijriToUTC: hijriToUTC, todayUTC: todayUTC,
-    timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk,
+    timeDecay: timeDecay, itemRisk: itemRisk, aggregateRisk: aggregateRisk, curve: curve,
     sevFromRisk: sevFromRisk, probFromDays: probFromDays, urgencyLabel: urgencyLabel,
     makeCode: makeCode, shortHash: shortHash, compile: compile
   };

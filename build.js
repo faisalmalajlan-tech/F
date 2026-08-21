@@ -11,6 +11,7 @@ const out = rd('src/index.template.html')
   .replace('/*__CONFIG__*/',     () => rd('src/config.js'))
   .replace('/*__ENGINE__*/',     () => rd('src/engine.js'))
   .replace('/*__AUDIT__*/',      () => rd('src/audit.js'))
+  .replace('/*__STORE__*/',      () => rd('src/store.js'))
   .replace('/*__APP__*/',        () => rd('src/app.js'));
 
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
@@ -19,7 +20,7 @@ fs.writeFileSync(path.join(__dirname, 'dist/nadheer.html'), out);
 // ── حارس الانعزال ──
 // كودنا نحن يجب أن يخلو تمامًا من أي مرجع شبكي.
 const ours = ['src/index.template.html', 'src/styles.css', 'src/config.js',
-              'src/engine.js', 'src/audit.js', 'src/app.js']
+              'src/engine.js', 'src/audit.js', 'src/store.js', 'src/app.js']
   .map(f => ({ f, src: rd(f) }));
 const NET = [/https?:\/\/(?!www\.w3\.org)[^\s"'`)]+/g, /\bfetch\s*\(/g, /XMLHttpRequest/g,
              /WebSocket/g, /navigator\.sendBeacon/g, /EventSource/g, /import\s*\(/g];
