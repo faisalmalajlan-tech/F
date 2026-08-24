@@ -743,6 +743,160 @@ body.gated nav.topnav{display:none}
   } catch (e) { /* قراءة PDF ستتعطل، وبقية التطبيق يعمل */ }
 })();
 </script>
+<script>/* نذير — التعمية من طرف إلى طرف.
+
+   المشكلة: من يعرف رابط المشروع ومفتاحه العام يقرأ كل ما في الجداول.
+   وسياساتُكم ليست بيانات عامة.
+
+   الحل: يُشفَّر نصّ كل مستند في المتصفح قبل أن يُرسل، بمفتاح فريقٍ
+   لا يُرسل إلى الخادم أبدًا. فمن يفتح قاعدة البيانات — أو يسرّبها —
+   لا يجد إلا رموزًا.
+
+   AES-GCM ٢٥٦ بت، ومفتاحه مشتقّ من عبارة الفريق بـPBKDF2 (٢١٠ آلاف
+   دورة، وهي توصية OWASP لـSHA-256). المِلح ثابت للفريق حتى يشتقّ
+   الجميعُ المفتاحَ نفسه من العبارة نفسها؛ وهذا يُضعف مقاومة الجداول
+   المحسوبة مسبقًا، فالعبارة يجب أن تكون طويلة. */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.NadheerCrypto = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var KEY_STORE = 'nadheer:teamkey';   // العبارة نفسها، في هذا الجهاز وحده
+  var ITER = 210000;
+  var subtle = null, key = null, phrase = '';
+
+  function sub() {
+    if (subtle) return subtle;
+    var c = (typeof window !== 'undefined' && window.crypto) ||
+            (typeof globalThis !== 'undefined' && globalThis.crypto);
+    subtle = c && c.subtle ? c.subtle : null;
+    return subtle;
+  }
+  function rnd(n) {
+    var c = (typeof window !== 'undefined' && window.crypto) || globalThis.crypto;
+    return c.getRandomValues(new Uint8Array(n));
+  }
+  var enc = function (s) { return new TextEncoder().encode(s); };
+  var dec = function (b) { return new TextDecoder().decode(b); };
+
+  function b64(buf) {
+    var a = new Uint8Array(buf), s = '';
+    for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+    return btoa(s);
+  }
+  function unb64(s) {
+    var bin = atob(s), a = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+
+  /* المِلح مشتقّ من العبارة نفسها لا عشوائي: أفراد الفريق يكتبون
+     العبارة على أجهزتهم المختلفة ويجب أن يخرج المفتاح نفسه. */
+  function saltOf(p) {
+    return sub().digest('SHA-256', enc('nadheer-salt-v1:' + p))
+      .then(function (h) { return new Uint8Array(h).slice(0, 16); });
+  }
+
+  function derive(p) {
+    if (!sub()) return Promise.reject(new Error('متصفحك لا يدعم التعمية (WebCrypto).'));
+    return saltOf(p).then(function (salt) {
+      return sub().importKey('raw', enc(p), 'PBKDF2', false, ['deriveKey'])
+        .then(function (base) {
+          return sub().deriveKey(
+            { name: 'PBKDF2', salt: salt, iterations: ITER, hash: 'SHA-256' },
+            base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+        });
+    });
+  }
+
+  function setPhrase(p) {
+    phrase = String(p || '');
+    key = null;
+    try {
+      if (phrase) window.localStorage.setItem(KEY_STORE, phrase);
+      else window.localStorage.removeItem(KEY_STORE);
+    } catch (e) {}
+    if (!phrase) return Promise.resolve({ ok: true, off: true });
+    return derive(phrase).then(function (k) { key = k; return { ok: true }; })
+      .catch(function (e) { return { ok: false, error: e.message }; });
+  }
+  function loadPhrase() {
+    try { phrase = window.localStorage.getItem(KEY_STORE) || ''; } catch (e) { phrase = ''; }
+    if (!phrase) return Promise.resolve(false);
+    return derive(phrase).then(function (k) { key = k; return true; }).catch(function () { return false; });
+  }
+  var isOn = function () { return !!phrase; };
+  var ready = function () { return !!key; };
+
+  var MARK = 'nadheer-enc-v1:';
+
+  function encrypt(text) {
+    if (!key || text === null || text === undefined || text === '') return Promise.resolve(text);
+    var iv = rnd(12);
+    return sub().encrypt({ name: 'AES-GCM', iv: iv }, key, enc(String(text)))
+      .then(function (ct) { return MARK + b64(iv) + '.' + b64(ct); });
+  }
+  var looksEncrypted = function (v) { return typeof v === 'string' && v.indexOf(MARK) === 0; };
+
+  function decrypt(blob) {
+    if (!looksEncrypted(blob)) return Promise.resolve(blob);   // نصٌّ قديم غير مشفَّر
+    if (!key) return Promise.reject(new Error('locked'));
+    var body = blob.slice(MARK.length), i = body.indexOf('.');
+    if (i < 0) return Promise.reject(new Error('تالف'));
+    var iv = unb64(body.slice(0, i)), ct = unb64(body.slice(i + 1));
+    return sub().decrypt({ name: 'AES-GCM', iv: iv }, key, ct).then(dec);
+  }
+
+  /* الحقول الحسّاسة وحدها تُشفَّر: النصوص. أما الأسماء والأكواد
+     والدرجات فتبقى ظاهرة ليعمل الفرز والعرض بلا فكّ كل شيء. */
+  var FIELDS = ['text', 'refText'];
+
+  function sealDoc(d) {
+    if (!key) return Promise.resolve(d);
+    var out = {}, jobs = [];
+    Object.keys(d).forEach(function (k) { out[k] = d[k]; });
+    FIELDS.forEach(function (f) {
+      if (typeof d[f] === 'string' && d[f] && !looksEncrypted(d[f])) {
+        jobs.push(encrypt(d[f]).then(function (v) { out[f] = v; }));
+      }
+    });
+    return Promise.all(jobs).then(function () { out.enc = true; return out; });
+  }
+  function openDoc(d) {
+    var out = {}, jobs = [], failed = false;
+    Object.keys(d).forEach(function (k) { out[k] = d[k]; });
+    FIELDS.forEach(function (f) {
+      if (looksEncrypted(d[f])) {
+        jobs.push(decrypt(d[f]).then(function (v) { out[f] = v; },
+                                     function () { failed = true; out[f] = ''; }));
+      }
+    });
+    return Promise.all(jobs).then(function () {
+      if (failed) out.locked = true;
+      return out;
+    });
+  }
+  function sealAll(list) { return Promise.all((list || []).map(sealDoc)); }
+  function openAll(list) { return Promise.all((list || []).map(openDoc)); }
+
+  /* تحقّقٌ من صحة العبارة: نُعمّي كلمةً معلومة ونحفظ الناتج على الخادم،
+     فمن يكتب عبارةً خاطئة يُكتشف فورًا بدل أن يرى مستندات فارغة. */
+  var PROBE = 'نذير-تحقق';
+  function makeProbe() { return encrypt(PROBE); }
+  function checkProbe(blob) {
+    if (!blob) return Promise.resolve({ ok: true, first: true });
+    return decrypt(blob).then(function (v) { return { ok: v === PROBE }; },
+                              function () { return { ok: false }; });
+  }
+
+  return { setPhrase: setPhrase, loadPhrase: loadPhrase, isOn: isOn, ready: ready,
+           encrypt: encrypt, decrypt: decrypt, looksEncrypted: looksEncrypted,
+           sealDoc: sealDoc, openDoc: openDoc, sealAll: sealAll, openAll: openAll,
+           makeProbe: makeProbe, checkProbe: checkProbe, FIELDS: FIELDS, ITER: ITER };
+});
+</script>
 <script>/* نذير — المزامنة مع خادم Supabase.
 
    المبدأ: محليٌّ أولًا. الواجهة تبقى تقرأ وتكتب في localStorage كما هي
@@ -752,10 +906,11 @@ body.gated nav.topnav{display:none}
 
    وإن لم يُضبط الخادم، يعمل التطبيق كما كان تمامًا: بلا شبكة إطلاقًا. */
 (function (root, factory) {
-  var api = factory();
+  var CR = (typeof module === 'object' && module.exports) ? require('./crypto.js') : root.NadheerCrypto;
+  var api = factory(CR);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.NadheerSync = api;
-})(typeof self !== 'undefined' ? self : this, function () {
+})(typeof self !== 'undefined' ? self : this, function (CR) {
   'use strict';
 
   var CFG_KEY = 'nadheer:supabase';
@@ -855,7 +1010,30 @@ body.gated nav.topnav{display:none}
       call('settings?select=*&id=eq.1'),
       call('accounts?select=*')
     ]).then(function (r) {
-      lsSet(K.docs, (r[0] || []).map(docIn));
+      var remote = (r[0] || []).map(docIn);
+      /* كشف التعارض: مستندٌ عُدّل هنا وهناك بعد آخر مزامنة. لا ندمج
+         تلقائيًا — نحتفظ بنسخة الخادم ونُعلم المستخدم بما اصطدم، فآخرُ
+         كتابةٍ تغلب صامتةً أسوأ من تحذيرٍ صريح. */
+      var mine = lsGet(K.docs, '[]'), byId = {};
+      mine.forEach(function (d) { byId[d.id] = d; });
+      state.clashes = remote.filter(function (rd) {
+        var m = byId[rd.id];
+        return m && state.pulledAt &&
+               JSON.stringify(m.text) !== JSON.stringify(rd.text) &&
+               (m.addedAt || 0) <= (rd.addedAt || 0);
+      }).map(function (d) { return d.name || d.id; });
+      return (CR && CR.ready() ? CR.openAll(remote) : Promise.resolve(remote))
+        .then(function (open) { return finishPull(open, r); });
+    }).then(function (x) { return x; })
+      .catch(function (e) {
+        state.busy = false; state.error = e.message || String(e);
+        fire('error'); return { ok: false, error: state.error };
+      });
+  }
+
+  function finishPull(docs, r) {
+    return Promise.resolve().then(function () {
+      lsSet(K.docs, docs);
       lsSet(K.reqs, (r[1] || []).map(function (x) { return mapIn(REQ_MAP, x); }).reverse());
       lsSet(K.vers, (r[2] || []).map(function (v) {
         return { id: v.id, at: v.at, label: v.label, actor: v.actor, docs: (v.docs || []).map(docIn) };
@@ -867,22 +1045,29 @@ body.gated nav.topnav{display:none}
       }));
       state.pulledAt = Date.now(); state.busy = false;
       fire('pull');
-      return { ok: true, docs: (r[0] || []).length,
-               settings: (r[3] && r[3][0]) ? r[3][0].config : null };
-    }).catch(function (e) {
-      state.busy = false; state.error = e.message || String(e);
-      fire('error'); return { ok: false, error: state.error };
+      var locked = docs.filter(function (d) { return d.locked; }).length;
+      return { ok: true, docs: docs.length, locked: locked,
+               clashes: state.clashes || [],
+               settings: (r[3] && r[3][0]) ? r[3][0].config : null,
+               probe: (r[3] && r[3][0]) ? r[3][0].probe : null };
     });
   }
 
   /* ── الدفع: بعد كل تغيير محلي ── */
+  /* التعمية تسبق الإرسال دائمًا: لا يغادر نصٌّ صريحٌ هذا المتصفح
+     ما دامت عبارة الفريق مضبوطة. */
+  function seal(docs) {
+    if (!CR || !CR.ready()) return Promise.resolve(docs);
+    return CR.sealAll(docs);
+  }
   function pushDocs() {
     if (!state.on) return Promise.resolve({ skipped: true });
     var docs = lsGet(K.docs, '[]');
     if (!docs.length) return Promise.resolve({ ok: true, n: 0 });
-    return call('docs', { method: 'POST', body: docs.map(docOut),
-                          prefer: 'resolution=merge-duplicates,return=minimal' })
-      .then(function () { state.pushedAt = Date.now(); return { ok: true, n: docs.length }; });
+    return seal(docs).then(function (sealed) {
+      return call('docs', { method: 'POST', body: sealed.map(docOut),
+                            prefer: 'resolution=merge-duplicates,return=minimal' });
+    }).then(function () { state.pushedAt = Date.now(); return { ok: true, n: docs.length }; });
   }
   function pushAll(actor) {
     if (!state.on) return Promise.resolve({ skipped: true });
@@ -3258,7 +3443,7 @@ body.gated nav.topnav{display:none}
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
       AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts,
-      SY = window.NadheerSync;
+      SY = window.NadheerSync, CR = window.NadheerCrypto;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -3481,6 +3666,20 @@ body.gated nav.topnav{display:none}
       });
     }, 900);
   }
+  /* رسالة ما بعد السحب: الصمت عن تعارضٍ أو مستندٍ مقفل أسوأ من
+     إزعاج المستخدم برسالة. */
+  function pullBanner(q) {
+    if (!q) return null;
+    if (q.ok === false) return { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+    var parts = [];
+    if (q.clashes && q.clashes.length)
+      parts.push('عُدّل على جهازٍ آخر بعد آخر مزامنة: ' + q.clashes.slice(0, 3).join('، ') +
+                 (q.clashes.length > 3 ? ' وغيرها' : '') + '. اعتُمدت نسخة الخادم — راجعها قبل المتابعة.');
+    if (q.locked)
+      parts.push(q.locked + ' مستندًا لم يُفكّ — عبارة الفريق عندك تخالف ما عُمّيت به. صحّحها من صفحة المزامنة.');
+    return parts.length ? { bad: true, msg: parts.join(' · ') } : null;
+  }
+
   /* مؤشر صغير في الشريط: متصل؟ آخر مزامنة؟ خطأ؟ */
   function renderSyncPill() {
     var el = $('syncPill'), off = $('offlinePill'); if (!el) return;
@@ -5336,7 +5535,7 @@ body.gated nav.topnav{display:none}
       '<p class="pagesub">اربط هذا الجهاز بخادم فريقك ليرى الجميع المستندات نفسها. ' +
       'الربط إعدادُ هذا الجهاز وحده — كل من يريد المشاركة يربط جهازه.</p>' +
       serverCard();
-    wire(el); wireServer(el);
+    wire(el); wireServer(el); wireCrypto();
   }
 
   /* ═══ ضبط الخادم المشترك ═══ */
@@ -5364,10 +5563,56 @@ body.gated nav.topnav{display:none}
       (st.on ? '<div class="row-btns"><button class="btn ghost" id="sbPull">اسحب من الخادم الآن</button>' +
                '<button class="btn ghost" id="sbPush">ادفع ما عندي الآن</button></div>' : '') +
       '<div id="sbMsg"></div>' +
-      '<div class="note">⚠ المفتاح العام يعطي من يعرفه قراءةً وكتابةً على بياناتكم. ' +
-      'يصلح لفريق صغير داخل جهة واحدة، ولا يصلح لنشرٍ عام. ' +
-      'وبتشغيل المزامنة تغادر مستنداتُك هذا الجهاز إلى الخادم.</div></div>';
+      '<div class="note">المفتاح العام يعطي من يعرفه وصولًا إلى الجداول. ' +
+      'ونصوصُ مستنداتك مُعمّاة قبل أن تغادر هذا المتصفح — فلا يقرؤها ' +
+      'حاملُ المفتاح — لكن تبقى الأسماء والأكواد والدرجات ظاهرة.</div></div>' +
+      cryptoCard();
   }
+  /* ═══ عبارة الفريق ═══
+     المفتاح لا يُرسل إلى الخادم أبدًا. ومن فقد العبارة فقد النصوص —
+     لا يوجد استرجاع، وهذا هو الثمن الذي يجعل التعمية تعني شيئًا. */
+  function cryptoCard() {
+    var on = CR && CR.isOn();
+    return '<div class="card"><div class="sectitle">تعمية المستندات</div>' +
+      '<div class="srv-state ' + (on ? 'on' : 'off') + '">' + ico('lock', 15) +
+      '<div>' + (on
+        ? '<b>مفعّلة.</b> نصوص المستندات تُعمّى في هذا المتصفح قبل إرسالها. ' +
+          'من يفتح قاعدة البيانات لا يجد إلا رموزًا.'
+        : '<b>مطفأة.</b> نصوص مستنداتك تُرسل إلى الخادم كما هي، ويقرؤها كل من يملك المفتاح العام.') +
+      '</div></div>' +
+      '<label class="field-label" for="ckPhrase">عبارة الفريق</label>' +
+      '<input type="password" id="ckPhrase" placeholder="عبارة طويلة يعرفها فريقك وحده">' +
+      '<div class="hintline">اكتبها نفسها حرفًا بحرف على كل جهاز. ' +
+      'لا تُرسل إلى الخادم إطلاقًا — ومن فقدها فقد النصوص، فلا استرجاع لها.</div>' +
+      '<div class="row-btns"><button class="btn" id="ckSave">' +
+        (on ? 'تغيير العبارة' : 'فعّل التعمية') + '</button>' +
+      (on ? '<button class="btn ghost" id="ckOff">إطفاء</button>' : '') + '</div>' +
+      '<div id="ckMsg"></div></div>';
+  }
+  function wireCrypto() {
+    var msg = function (t, bad) {
+      var m = $('ckMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
+    };
+    var sv = $('ckSave');
+    if (sv) sv.addEventListener('click', function () {
+      var p = ($('ckPhrase').value || '').trim();
+      if (p.length < 12) { msg('اجعلها اثني عشر حرفًا فأكثر — القصيرة تُخمَّن.', true); return; }
+      msg('جارٍ اشتقاق المفتاح…');
+      CR.setPhrase(p).then(function (r) {
+        if (!r.ok) { msg(r.error || 'تعذّر', true); return; }
+        AU.log({ kind: 'security', actor: S.session.name, title: 'تفعيل تعمية المستندات', detail: '' });
+        msg('فُعّلت. أعد دفع مستنداتك ليُعاد إرسالها مُعمّاة.');
+        renderSync();
+      });
+    });
+    var of = $('ckOff');
+    if (of) of.addEventListener('click', function () {
+      CR.setPhrase('');
+      AU.log({ kind: 'security', actor: S.session.name, title: 'إطفاء تعمية المستندات', detail: '' });
+      renderSync();
+    });
+  }
+
   function wireServer(el) {
     var msg = function (t, bad) {
       var m = $('sbMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
@@ -5402,7 +5647,9 @@ body.gated nav.topnav{display:none}
       SY.pull().then(function (q) {
         if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
         refreshAll(); renderSyncPill();
-        msg(q.ok ? ('وصل ' + (q.docs || 0) + ' مستندًا.') : ('خطأ: ' + q.error), !q.ok);
+        var b = pullBanner(q);
+        msg(b ? b.msg : ('وصل ' + (q.docs || 0) + ' مستندًا' +
+            (q.locked ? ' (' + q.locked + ' مقفل)' : '') + '.'), !!(b && b.bad));
       });
     });
     var ps = $('sbPush');
@@ -5537,7 +5784,7 @@ body.gated nav.topnav{display:none}
       SY.pull().then(function (q) {
         if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
         renderSyncPill();
-        if (q && q.ok === false) S.banner = { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+        S.banner = pullBanner(q);
         refreshAll();
         routes[S.route] ? routes[S.route]() : renderHome();
       });

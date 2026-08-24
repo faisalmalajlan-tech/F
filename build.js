@@ -14,6 +14,7 @@ const out = rd('src/index.template.html')
         fs.readFileSync(path.join(__dirname, 'src/mesh.svg')).toString('base64') + '")'))
   .replace('/*__PDFJS__*/',      () => SLIM ? '/* pdf.js غير مضمَّن في البناء النحيف */' : rd('vendor/pdf.min.js'))
   .replace('/*__WORKER_B64__*/', () => SLIM ? '' : fs.readFileSync(path.join(__dirname, 'vendor/pdf.worker.min.js')).toString('base64'))
+  .replace('/*__CRYPTO__*/',     () => rd('src/crypto.js'))
   .replace('/*__SYNC__*/',       () => rd('src/sync.js'))
   .replace('/*__CONFIG__*/',     () => rd('src/config.js'))
   .replace('/*__ENGINE__*/',     () => rd('src/engine.js'))
@@ -35,7 +36,8 @@ fs.writeFileSync(path.join(__dirname, SLIM ? 'dist/nadheer-slim.html' : 'dist/na
 /* sync.js يُستثنى من حارس الانعزال: هو الوحيد المصرَّح له بالشبكة،
    وبلا ضبطٍ من المستخدم لا يتصل بشيء. */
 const ours = ['src/index.template.html', 'src/styles.css', 'src/config.js',
-              'src/engine.js', 'src/audit.js', 'src/store.js', 'src/conflicts.js', 'src/app.js']
+              'src/engine.js', 'src/audit.js', 'src/store.js', 'src/conflicts.js',
+              'src/crypto.js', 'src/app.js']
   .map(f => ({ f, src: rd(f) }));
 const NET = [/https?:\/\/(?!www\.w3\.org)[^\s"'`)]+/g, /\bfetch\s*\(/g, /XMLHttpRequest/g,
              /WebSocket/g, /navigator\.sendBeacon/g, /EventSource/g, /import\s*\(/g];

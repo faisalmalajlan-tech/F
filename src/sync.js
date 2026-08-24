@@ -7,10 +7,11 @@
 
    وإن لم يُضبط الخادم، يعمل التطبيق كما كان تمامًا: بلا شبكة إطلاقًا. */
 (function (root, factory) {
-  var api = factory();
+  var CR = (typeof module === 'object' && module.exports) ? require('./crypto.js') : root.NadheerCrypto;
+  var api = factory(CR);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.NadheerSync = api;
-})(typeof self !== 'undefined' ? self : this, function () {
+})(typeof self !== 'undefined' ? self : this, function (CR) {
   'use strict';
 
   var CFG_KEY = 'nadheer:supabase';
@@ -110,7 +111,30 @@
       call('settings?select=*&id=eq.1'),
       call('accounts?select=*')
     ]).then(function (r) {
-      lsSet(K.docs, (r[0] || []).map(docIn));
+      var remote = (r[0] || []).map(docIn);
+      /* كشف التعارض: مستندٌ عُدّل هنا وهناك بعد آخر مزامنة. لا ندمج
+         تلقائيًا — نحتفظ بنسخة الخادم ونُعلم المستخدم بما اصطدم، فآخرُ
+         كتابةٍ تغلب صامتةً أسوأ من تحذيرٍ صريح. */
+      var mine = lsGet(K.docs, '[]'), byId = {};
+      mine.forEach(function (d) { byId[d.id] = d; });
+      state.clashes = remote.filter(function (rd) {
+        var m = byId[rd.id];
+        return m && state.pulledAt &&
+               JSON.stringify(m.text) !== JSON.stringify(rd.text) &&
+               (m.addedAt || 0) <= (rd.addedAt || 0);
+      }).map(function (d) { return d.name || d.id; });
+      return (CR && CR.ready() ? CR.openAll(remote) : Promise.resolve(remote))
+        .then(function (open) { return finishPull(open, r); });
+    }).then(function (x) { return x; })
+      .catch(function (e) {
+        state.busy = false; state.error = e.message || String(e);
+        fire('error'); return { ok: false, error: state.error };
+      });
+  }
+
+  function finishPull(docs, r) {
+    return Promise.resolve().then(function () {
+      lsSet(K.docs, docs);
       lsSet(K.reqs, (r[1] || []).map(function (x) { return mapIn(REQ_MAP, x); }).reverse());
       lsSet(K.vers, (r[2] || []).map(function (v) {
         return { id: v.id, at: v.at, label: v.label, actor: v.actor, docs: (v.docs || []).map(docIn) };
@@ -122,22 +146,29 @@
       }));
       state.pulledAt = Date.now(); state.busy = false;
       fire('pull');
-      return { ok: true, docs: (r[0] || []).length,
-               settings: (r[3] && r[3][0]) ? r[3][0].config : null };
-    }).catch(function (e) {
-      state.busy = false; state.error = e.message || String(e);
-      fire('error'); return { ok: false, error: state.error };
+      var locked = docs.filter(function (d) { return d.locked; }).length;
+      return { ok: true, docs: docs.length, locked: locked,
+               clashes: state.clashes || [],
+               settings: (r[3] && r[3][0]) ? r[3][0].config : null,
+               probe: (r[3] && r[3][0]) ? r[3][0].probe : null };
     });
   }
 
   /* ── الدفع: بعد كل تغيير محلي ── */
+  /* التعمية تسبق الإرسال دائمًا: لا يغادر نصٌّ صريحٌ هذا المتصفح
+     ما دامت عبارة الفريق مضبوطة. */
+  function seal(docs) {
+    if (!CR || !CR.ready()) return Promise.resolve(docs);
+    return CR.sealAll(docs);
+  }
   function pushDocs() {
     if (!state.on) return Promise.resolve({ skipped: true });
     var docs = lsGet(K.docs, '[]');
     if (!docs.length) return Promise.resolve({ ok: true, n: 0 });
-    return call('docs', { method: 'POST', body: docs.map(docOut),
-                          prefer: 'resolution=merge-duplicates,return=minimal' })
-      .then(function () { state.pushedAt = Date.now(); return { ok: true, n: docs.length }; });
+    return seal(docs).then(function (sealed) {
+      return call('docs', { method: 'POST', body: sealed.map(docOut),
+                            prefer: 'resolution=merge-duplicates,return=minimal' });
+    }).then(function () { state.pushedAt = Date.now(); return { ok: true, n: docs.length }; });
   }
   function pushAll(actor) {
     if (!state.on) return Promise.resolve({ skipped: true });

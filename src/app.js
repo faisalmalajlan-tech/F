@@ -3,7 +3,7 @@
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
       AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts,
-      SY = window.NadheerSync;
+      SY = window.NadheerSync, CR = window.NadheerCrypto;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -226,6 +226,20 @@
       });
     }, 900);
   }
+  /* رسالة ما بعد السحب: الصمت عن تعارضٍ أو مستندٍ مقفل أسوأ من
+     إزعاج المستخدم برسالة. */
+  function pullBanner(q) {
+    if (!q) return null;
+    if (q.ok === false) return { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+    var parts = [];
+    if (q.clashes && q.clashes.length)
+      parts.push('عُدّل على جهازٍ آخر بعد آخر مزامنة: ' + q.clashes.slice(0, 3).join('، ') +
+                 (q.clashes.length > 3 ? ' وغيرها' : '') + '. اعتُمدت نسخة الخادم — راجعها قبل المتابعة.');
+    if (q.locked)
+      parts.push(q.locked + ' مستندًا لم يُفكّ — عبارة الفريق عندك تخالف ما عُمّيت به. صحّحها من صفحة المزامنة.');
+    return parts.length ? { bad: true, msg: parts.join(' · ') } : null;
+  }
+
   /* مؤشر صغير في الشريط: متصل؟ آخر مزامنة؟ خطأ؟ */
   function renderSyncPill() {
     var el = $('syncPill'), off = $('offlinePill'); if (!el) return;
@@ -2081,7 +2095,7 @@
       '<p class="pagesub">اربط هذا الجهاز بخادم فريقك ليرى الجميع المستندات نفسها. ' +
       'الربط إعدادُ هذا الجهاز وحده — كل من يريد المشاركة يربط جهازه.</p>' +
       serverCard();
-    wire(el); wireServer(el);
+    wire(el); wireServer(el); wireCrypto();
   }
 
   /* ═══ ضبط الخادم المشترك ═══ */
@@ -2109,10 +2123,56 @@
       (st.on ? '<div class="row-btns"><button class="btn ghost" id="sbPull">اسحب من الخادم الآن</button>' +
                '<button class="btn ghost" id="sbPush">ادفع ما عندي الآن</button></div>' : '') +
       '<div id="sbMsg"></div>' +
-      '<div class="note">⚠ المفتاح العام يعطي من يعرفه قراءةً وكتابةً على بياناتكم. ' +
-      'يصلح لفريق صغير داخل جهة واحدة، ولا يصلح لنشرٍ عام. ' +
-      'وبتشغيل المزامنة تغادر مستنداتُك هذا الجهاز إلى الخادم.</div></div>';
+      '<div class="note">المفتاح العام يعطي من يعرفه وصولًا إلى الجداول. ' +
+      'ونصوصُ مستنداتك مُعمّاة قبل أن تغادر هذا المتصفح — فلا يقرؤها ' +
+      'حاملُ المفتاح — لكن تبقى الأسماء والأكواد والدرجات ظاهرة.</div></div>' +
+      cryptoCard();
   }
+  /* ═══ عبارة الفريق ═══
+     المفتاح لا يُرسل إلى الخادم أبدًا. ومن فقد العبارة فقد النصوص —
+     لا يوجد استرجاع، وهذا هو الثمن الذي يجعل التعمية تعني شيئًا. */
+  function cryptoCard() {
+    var on = CR && CR.isOn();
+    return '<div class="card"><div class="sectitle">تعمية المستندات</div>' +
+      '<div class="srv-state ' + (on ? 'on' : 'off') + '">' + ico('lock', 15) +
+      '<div>' + (on
+        ? '<b>مفعّلة.</b> نصوص المستندات تُعمّى في هذا المتصفح قبل إرسالها. ' +
+          'من يفتح قاعدة البيانات لا يجد إلا رموزًا.'
+        : '<b>مطفأة.</b> نصوص مستنداتك تُرسل إلى الخادم كما هي، ويقرؤها كل من يملك المفتاح العام.') +
+      '</div></div>' +
+      '<label class="field-label" for="ckPhrase">عبارة الفريق</label>' +
+      '<input type="password" id="ckPhrase" placeholder="عبارة طويلة يعرفها فريقك وحده">' +
+      '<div class="hintline">اكتبها نفسها حرفًا بحرف على كل جهاز. ' +
+      'لا تُرسل إلى الخادم إطلاقًا — ومن فقدها فقد النصوص، فلا استرجاع لها.</div>' +
+      '<div class="row-btns"><button class="btn" id="ckSave">' +
+        (on ? 'تغيير العبارة' : 'فعّل التعمية') + '</button>' +
+      (on ? '<button class="btn ghost" id="ckOff">إطفاء</button>' : '') + '</div>' +
+      '<div id="ckMsg"></div></div>';
+  }
+  function wireCrypto() {
+    var msg = function (t, bad) {
+      var m = $('ckMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
+    };
+    var sv = $('ckSave');
+    if (sv) sv.addEventListener('click', function () {
+      var p = ($('ckPhrase').value || '').trim();
+      if (p.length < 12) { msg('اجعلها اثني عشر حرفًا فأكثر — القصيرة تُخمَّن.', true); return; }
+      msg('جارٍ اشتقاق المفتاح…');
+      CR.setPhrase(p).then(function (r) {
+        if (!r.ok) { msg(r.error || 'تعذّر', true); return; }
+        AU.log({ kind: 'security', actor: S.session.name, title: 'تفعيل تعمية المستندات', detail: '' });
+        msg('فُعّلت. أعد دفع مستنداتك ليُعاد إرسالها مُعمّاة.');
+        renderSync();
+      });
+    });
+    var of = $('ckOff');
+    if (of) of.addEventListener('click', function () {
+      CR.setPhrase('');
+      AU.log({ kind: 'security', actor: S.session.name, title: 'إطفاء تعمية المستندات', detail: '' });
+      renderSync();
+    });
+  }
+
   function wireServer(el) {
     var msg = function (t, bad) {
       var m = $('sbMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
@@ -2147,7 +2207,9 @@
       SY.pull().then(function (q) {
         if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
         refreshAll(); renderSyncPill();
-        msg(q.ok ? ('وصل ' + (q.docs || 0) + ' مستندًا.') : ('خطأ: ' + q.error), !q.ok);
+        var b = pullBanner(q);
+        msg(b ? b.msg : ('وصل ' + (q.docs || 0) + ' مستندًا' +
+            (q.locked ? ' (' + q.locked + ' مقفل)' : '') + '.'), !!(b && b.bad));
       });
     });
     var ps = $('sbPush');
@@ -2282,7 +2344,7 @@
       SY.pull().then(function (q) {
         if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
         renderSyncPill();
-        if (q && q.ok === false) S.banner = { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+        S.banner = pullBanner(q);
         refreshAll();
         routes[S.route] ? routes[S.route]() : renderHome();
       });

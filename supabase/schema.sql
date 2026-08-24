@@ -57,6 +57,9 @@ create table if not exists public.versions (
 create table if not exists public.settings (
   id         int primary key default 1,
   config     jsonb,
+  -- كلمةٌ معلومة مُعمّاة بعبارة الفريق: من يكتب عبارةً خاطئة يُكتشف
+  -- فورًا بدل أن يرى مستنداتٍ فارغة بلا تفسير.
+  probe      text,
   updated_at timestamptz default now(),
   updated_by text default '',
   constraint settings_single_row check (id = 1)
@@ -82,9 +85,14 @@ create index if not exists versions_at_idx      on public.versions (at desc);
 -- ── ٣) أمن الصفوف ──
 -- ⚠ هذه السياسات تفتح الجداول لحامل المفتاح العام (anon).
 -- تعني: من يعرف رابط مشروعك ومفتاحه يستطيع القراءة والكتابة.
--- تصلح لفريق صغير موثوق داخل جهة واحدة، ولا تصلح لنشرٍ عام.
--- للحماية الحقيقية: فعّل Supabase Auth واستبدل using(true) بشرطٍ
--- على auth.uid()، ثم أعد تشغيل هذا القسم.
+--
+-- لكن نصوص المستندات **مُعمّاة في المتصفح** قبل أن تصل هنا
+-- (AES-GCM ٢٥٦، ومفتاحها مشتقّ من عبارة الفريق التي لا تُرسل أبدًا).
+-- فمن يقرأ هذه الجداول — أو يسرّبها — لا يجد إلا رموزًا. تبقى ظاهرةً:
+-- أسماء المستندات وأكوادها ودرجات خطرها، وهي بذاتها معلومات.
+--
+-- ومع ذلك يبقى بوسع حامل المفتاح **الحذف والإفساد**. لمنع ذلك:
+-- فعّل Supabase Auth واستبدل using(true) بشرطٍ على auth.uid().
 
 alter table public.docs      enable row level security;
 alter table public.requests  enable row level security;

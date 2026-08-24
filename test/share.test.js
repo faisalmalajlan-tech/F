@@ -84,10 +84,65 @@ const APP = 'file://' + path.resolve(__dirname, '../dist/nadheer.html');
   ok(ap.indexOf('مستند من الجهاز الثاني') > -1,
      'طلب المستخدم من جهازه وصل إلى المدير — وهذا ما كان مستحيلًا بلا خادم');
 
+  console.log('\n— التعمية بين جهازين —');
+  const PHRASE = 'عبارة فريق نذير الطويلة ٢٠٢٦';
+  await nav(A, 'sync');
+  await A.fill('#ckPhrase', PHRASE); await A.click('#ckSave'); await A.waitForTimeout(1800);
+  ok((await A.locator('.card .srv-state.on').count()) >= 2, 'التعمية فُعّلت على الجهاز الأول');
+  await A.click('#sbPush'); await A.waitForTimeout(2500);
+
+  /* نسأل الخادم مباشرةً: ماذا يرى من يفتح قاعدة البيانات؟ */
+  const onServer = await A.evaluate(async ({ u, k }) => {
+    const r = await fetch(u + '/rest/v1/docs?select=*', { headers: { apikey: k, Authorization: 'Bearer ' + k } });
+    return await r.json();
+  }, { u: URL_, k: KEY });
+  const blob = JSON.stringify(onServer);
+  ok(blob.indexOf('500000') < 0 && blob.indexOf('المورد') < 0,
+     'لا أثر لنصّ المستند على الخادم — لا المبلغ ولا الطرف');
+  ok(/nadheer-enc-v1/.test(blob), 'النصوص مخزَّنة مُعمّاة');
+  ok(blob.indexOf('سياسة مشتركة') > -1, 'والأسماء ظاهرة عمدًا — ليعمل الفرز');
+
+  console.log('\n— جهاز ثالث بالعبارة نفسها —');
+  const Cc = await mk('C');
+  await login(Cc, 'rawan', 'RA12');
+  await nav(Cc, 'sync');
+  await Cc.fill('#ckPhrase', PHRASE); await Cc.click('#ckSave'); await Cc.waitForTimeout(1800);
+  await Cc.fill('#sbUrl', URL_); await Cc.fill('#sbKey', KEY);
+  await Cc.click('#sbSave'); await Cc.waitForTimeout(3000);
+  await nav(Cc, 'docs');
+  const seenC = await Cc.locator('#pageContent').textContent();
+  ok(seenC.indexOf('سياسة مشتركة') > -1, 'وصله المستند');
+  const textC = await Cc.evaluate(() => {
+    try { const d = JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]');
+      const h = d.filter(x => (x.name || '').indexOf('مشتركة') > -1)[0];
+      return h ? { t: h.text || '', locked: !!h.locked } : null; } catch (e) { return null; }
+  });
+  ok(textC && textC.t.indexOf('500000') > -1, 'وفكّ نصّه سليمًا بالعبارة نفسها');
+  ok(textC && !textC.locked, 'بلا وسم قفل');
+
+  console.log('\n— جهاز رابع بعبارة خاطئة —');
+  const Dd = await mk('D');
+  await login(Dd, 'safiah', '1313SA');
+  await nav(Dd, 'sync');
+  await Dd.fill('#ckPhrase', 'عبارة مختلفة تمامًا هنا'); await Dd.click('#ckSave'); await Dd.waitForTimeout(1800);
+  await Dd.fill('#sbUrl', URL_); await Dd.fill('#sbKey', KEY);
+  await Dd.click('#sbSave'); await Dd.waitForTimeout(3000);
+  const textD = await Dd.evaluate(() => {
+    try { const d = JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]');
+      const h = d.filter(x => (x.name || '').indexOf('مشتركة') > -1)[0];
+      return h ? { t: h.text || '', locked: !!h.locked, name: h.name } : null; } catch (e) { return null; }
+  });
+  ok(textD && textD.locked === true, 'يراه «مقفلًا» — لا يفكّه بعبارة خاطئة');
+  ok(textD && textD.t.indexOf('500000') < 0, 'ولا يصل إليه النص إطلاقًا');
+  ok(textD && textD.name.indexOf('مشتركة') > -1, 'والاسم ظاهر ليعرف أنه موجود ومقفل');
+
   console.log('\n— الفصل —');
   await nav(B, 'sync');
   await B.click('#sbOff'); await B.waitForTimeout(600);
-  ok((await B.locator('.srv-state.off').count()) === 1, 'الفصل يعمل');
+  /* صار في الصفحة بطاقتان (خادم وتعمية) لكلٍّ حالتها، فنميّز بالزرّ:
+     ظهور «اختبر واحفظ» بلا «فصل» يعني أن الاتصال قُطع. */
+  ok((await B.locator('#sbOff').count()) === 0 && (await B.locator('#sbSave').count()) === 1,
+     'الفصل يعمل');
   ok((await B.locator('#offlinePill').isVisible()), 'وشارة «بلا إنترنت» رجعت');
   ok((await docCount(B)) >= 2, 'والبيانات المسحوبة باقية محليًا بعد الفصل');
 

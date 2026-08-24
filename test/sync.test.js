@@ -5,13 +5,26 @@ global.window={localStorage:{
   setItem:(k,v)=>{store[k]=String(v)},
   removeItem:k=>{delete store[k]}
 }};
-global.fetch=require('node:util').promisify?global.fetch:undefined;
+global.btoa=s=>Buffer.from(s,'binary').toString('base64');
+global.atob=s=>Buffer.from(s,'base64').toString('binary');
+const CR=require('/home/user/F/src/crypto.js');
 const SY=require('/home/user/F/src/sync.js');
 let pass=0,fail=0;
 const ok=(c,m)=>{c?(pass++,console.log('  ✓ '+m)):(fail++,console.log('  ✗ '+m));};
 const U='http://127.0.0.1:8787', K='test-anon-key';
 
+/* الاختبار يفترض خادمًا نظيفًا: بقايا تشغيلٍ سابق تقلب كل عدّة. */
+async function wipe(){
+ for(const t of ['docs','requests','versions','settings','accounts']){
+   const r=await fetch(U+'/rest/v1/'+t+'?select=id',{headers:{apikey:K,Authorization:'Bearer '+K}});
+   const rows=await r.json();
+   for(const row of rows) await fetch(U+'/rest/v1/'+t+'?id=eq.'+encodeURIComponent(row.id),
+     {method:'DELETE',headers:{apikey:K,Authorization:'Bearer '+K}});
+ }
+}
+
 (async()=>{
+ await wipe();
  console.log('\n— الضبط —');
  ok(!SY.isOn(),'بلا ضبط: المزامنة مطفأة (التطبيق محليّ تمامًا)');
  const bad=await SY.test(U,'wrong-key-123');
@@ -71,11 +84,41 @@ const U='http://127.0.0.1:8787', K='test-anon-key';
  ok(back.settings&&back.settings.scoring.thresholds.critical===80,'وتعود مع السحب: عتبة '+
     (back.settings?back.settings.scoring.thresholds.critical:'—'));
 
+ console.log('\n— التعمية عبر الشبكة —');
+ // نتحقق مما يصل الخادم فعلًا، لا مما نظنّه يصل
+ await CR.setPhrase('عبارة الفريق السرية الطويلة');
+ store['nadheer:docs:v1']=JSON.stringify([{id:'d9',name:'سياسة سرية',
+   text:'المادة الثالثة: غرامة 500000 ريال عند التأخر.',refText:'مرجع سري',
+   caseCode:'NR-9',history:[],tasks:{},lastRisk:90,addedAt:9}]);
+ await SY.pushAll('فيصل');
+ const raw=await (await fetch(U+'/rest/v1/docs?select=*',{headers:{apikey:K,Authorization:'Bearer '+K}})).json();
+ const onServer=raw.filter(d=>d.id==='d9')[0];
+ ok(onServer,'وصل المستند إلى الخادم');
+ ok(!/غرامة|500000|التأخر/.test(JSON.stringify(onServer)),
+    'ولا أثر لنصّه على الخادم — لا كلمة «غرامة» ولا المبلغ');
+ ok(/nadheer-enc-v1/.test(onServer.text),'النص مخزَّن مشفَّرًا');
+ ok(onServer.name==='سياسة سرية','والاسم ظاهر عمدًا — ليعمل الفرز');
+ // جهاز آخر بالعبارة نفسها
+ delete store['nadheer:docs:v1'];
+ const q2=await SY.pull();
+ const mine9=JSON.parse(store['nadheer:docs:v1']).filter(d=>d.id==='d9')[0];
+ ok(mine9.text.indexOf('غرامة')>-1,'وجهازٌ بالعبارة نفسها يقرؤه سليمًا');
+ ok(!mine9.locked,'بلا وسم قفل');
+ // جهاز بعبارة خاطئة
+ await CR.setPhrase('عبارة غلط تمامًا');
+ delete store['nadheer:docs:v1'];
+ const q3=await SY.pull();
+ const lock=JSON.parse(store['nadheer:docs:v1']).filter(d=>d.id==='d9')[0];
+ ok(lock.locked===true,'وجهازٌ بعبارة خاطئة يراه «مقفلًا» لا فارغًا');
+ ok(q3.locked>=1,'والسحب يبلّغ بعدد المقفل: '+q3.locked);
+ await CR.setPhrase('');
+
  console.log('\n— الانقطاع —');
  SY.setConfig('http://127.0.0.1:9999','x');
  const off=await SY.pull();
  ok(!off.ok,'خادم لا يستجيب ⇒ خطأ واضح لا انهيار');
- ok(JSON.parse(store['nadheer:docs:v1']).length===1,'والبيانات المحلية باقية سليمة');
+ ok(JSON.parse(store['nadheer:docs:v1']).length>=1,
+    'والبيانات المحلية باقية سليمة: '+JSON.parse(store['nadheer:docs:v1']).length+' مستندًا');
 
  console.log('\n'+(fail?'✗ ':'✓ ')+pass+' نجحت، '+fail+' فشلت');
  process.exit(fail?1:0);
