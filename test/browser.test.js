@@ -43,7 +43,9 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(await page.locator('#gate.open').isVisible(), 'البوابة تظهر أولًا');
   await login('faisal');
   ok(!(await page.locator('#gate.open').isVisible()), 'الدخول بحساب مستخدم يعمل');
-  ok((await navCount()) === 3, 'المستخدم العادي يرى ٣ صفحات فقط (كانت ٧)');
+  /* صارت أربعًا: أُضيفت «المزامنة» — ربطُ الجهاز بالخادم يحتاجه كل
+   مستخدم على جهازه، فلا يصحّ حصره بالمدير. */
+  ok((await navCount()) === 4, 'المستخدم العادي يرى ٤ صفحات (منها المزامنة)');
 
   console.log('\n— الخلفية المتحركة —');
   /* فيديو حقيقي لا صورة: نتحقق أن الزمن يتقدّم فعلًا */
@@ -349,7 +351,7 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   await page.click('#logoutBtn'); await page.waitForTimeout(400);
   await login('admin');
   ok((await page.locator('#userRole').textContent()) === 'مدير النظام', 'دخول المدير');
-  ok((await navCount()) === 7, 'المدير يرى ٧ صفحات (منها الموافقات والنسخ)');
+  ok((await navCount()) === 8, 'المدير يرى ٨ صفحات (منها الموافقات والمزامنة)');
   await nav('docs');
   ok((await page.locator('.doc-card').count()) === 7, 'المستندات باقية بعد تبديل المستخدم');
   await nav('admin');

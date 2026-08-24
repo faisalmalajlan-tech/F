@@ -14,6 +14,7 @@ const out = rd('src/index.template.html')
         fs.readFileSync(path.join(__dirname, 'src/mesh.svg')).toString('base64') + '")'))
   .replace('/*__PDFJS__*/',      () => SLIM ? '/* pdf.js غير مضمَّن في البناء النحيف */' : rd('vendor/pdf.min.js'))
   .replace('/*__WORKER_B64__*/', () => SLIM ? '' : fs.readFileSync(path.join(__dirname, 'vendor/pdf.worker.min.js')).toString('base64'))
+  .replace('/*__SYNC__*/',       () => rd('src/sync.js'))
   .replace('/*__CONFIG__*/',     () => rd('src/config.js'))
   .replace('/*__ENGINE__*/',     () => rd('src/engine.js'))
   .replace('/*__AUDIT__*/',      () => rd('src/audit.js'))
@@ -31,6 +32,8 @@ fs.writeFileSync(path.join(__dirname, SLIM ? 'dist/nadheer-slim.html' : 'dist/na
 
 // ── حارس الانعزال ──
 // كودنا نحن يجب أن يخلو تمامًا من أي مرجع شبكي.
+/* sync.js يُستثنى من حارس الانعزال: هو الوحيد المصرَّح له بالشبكة،
+   وبلا ضبطٍ من المستخدم لا يتصل بشيء. */
 const ours = ['src/index.template.html', 'src/styles.css', 'src/config.js',
               'src/engine.js', 'src/audit.js', 'src/store.js', 'src/conflicts.js', 'src/app.js']
   .map(f => ({ f, src: rd(f) }));
@@ -47,11 +50,16 @@ if (bad.length) { console.error('✗ مراجع شبكية في كودنا:\n  '
 // خط الدفاع الفعلي هو الـCSP في القالب — يمنع المتصفحُ أي اتصال خارجي حتى لو استُدعي.
 const csp = rd('src/index.template.html').match(/Content-Security-Policy" content="([^"]+)"/);
 if (!csp) { console.error('✗ وسم CSP مفقود من القالب'); process.exit(1); }
-['default-src \'none\'', 'connect-src blob: data:', 'media-src data:'].forEach(d => {
+['default-src \'none\'', 'media-src data:'].forEach(d => {
   if (!csp[1].includes(d)) { console.error('✗ CSP لا يتضمن: ' + d); process.exit(1); }
 });
 
 console.log('✓ dist/' + (SLIM ? 'nadheer-slim' : 'nadheer') + '.html — ' +
   (out.length / 1048576).toFixed(2) + ' ميجابايت' + (SLIM ? '  (بلا PDF ولا فيديو)' : ''));
 console.log('✓ صفر مراجع شبكية في كودنا (' + ours.length + ' ملفات)');
-console.log('✓ CSP يمنع أي اتصال خارجي: ' + csp[1].slice(0, 58) + '…');
+/* لم يعد المنع مطلقًا: connect-src يسمح https ليصل المستخدم بخادمه.
+   قولُ غير ذلك في مخرجات البناء ادّعاءٌ كاذب على أنفسنا. */
+const openNet = csp[1].includes('connect-src') && /connect-src[^;]*https:/.test(csp[1]);
+console.log(openNet
+  ? '⚠ CSP يسمح بالاتصال بخادم المزامنة (https) — وبلا ضبطٍ من المستخدم لا يتصل بشيء'
+  : '✓ CSP يمنع أي اتصال خارجي: ' + csp[1].slice(0, 58) + '…');

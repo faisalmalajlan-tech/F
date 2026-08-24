@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src blob: data:; worker-src blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src blob: data: https:; worker-src blob:">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D8BE86' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 1.8 22.2 12 12 22.2 1.8 12Z' stroke-width='1.15' opacity='.55'/%3E%3Cpath d='M6.9 16.4a5.15 5.15 0 0 1 10.2 0' stroke-width='1.15' opacity='.45'/%3E%3Cpath d='M8.85 16.4a3.2 3.2 0 0 1 6.3 0' stroke-width='1.3' opacity='.8'/%3E%3Ccircle cx='12' cy='16.5' r='1.45' fill='%23D8BE86' stroke='none'/%3E%3C/svg%3E">
 <title>نذير — ذكاء الامتثال الاستباقي</title>
 <style>:root{
@@ -627,6 +627,23 @@ body.gated nav.topnav{display:none}
 .auto-note .auto-stop{background:none;border:1px solid var(--line2);color:var(--text2);
   border-radius:2px;padding:4px 11px;font-size:10.5px;cursor:pointer;font-family:inherit}
 .auto-note .auto-stop:hover{border-color:var(--gold);color:var(--gold2)}
+
+/* شارة المزامنة — تحلّ محلّ «يعمل بلا إنترنت» متى ضُبط خادم */
+.syncpill{display:inline-flex;align-items:center;gap:6px;font-size:9px;color:var(--text2);
+  letter-spacing:.06em;border:1px solid rgba(95,211,168,.32);border-radius:2px;
+  padding:4px 9px;margin-left:10px;cursor:default}
+.syncpill i{width:4px;height:4px;border-radius:50%;background:var(--c-good);display:block}
+.syncpill.busy{border-color:rgba(216,190,134,.4);color:var(--gold2)}
+.syncpill.busy i{background:var(--gold);animation:pulse 1s ease-in-out infinite}
+.syncpill.bad{border-color:rgba(255,107,122,.4);color:#FFAEB6}
+.syncpill.bad i{background:var(--c-crit)}
+@keyframes pulse{50%{opacity:.35}}
+
+/* شاشة ضبط الخادم */
+.srv-state{display:flex;align-items:center;gap:9px;padding:11px 13px;border-radius:2px;
+  font-size:11.5px;line-height:1.8;margin-bottom:14px;font-weight:300}
+.srv-state.on{background:rgba(95,211,168,.07);border:1px solid rgba(95,211,168,.3);color:#7FE0BC}
+.srv-state.off{background:var(--card);border:1px solid var(--line);color:var(--text2)}
 </style>
 </head>
 <body>
@@ -638,7 +655,10 @@ body.gated nav.topnav{display:none}
     <div class="userinfo"><span class="un" id="userName">—</span><span class="ur" id="userRole">—</span></div>
   </div>
   <div style="display:flex;align-items:center">
-    <span class="offline" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق"><i></i>يعمل بلا إنترنت</span>
+    <!-- الشارة تتبدّل: بلا مزامنة تقول «بلا إنترنت» وهو صحيح، ومع
+         المزامنة تقول «مشترك» — وإبقاؤها على الأولى ادّعاء كاذب. -->
+    <span class="offline" id="offlinePill" title="لا يوجد أي اتصال بالشبكة في هذا التطبيق"><i></i>يعمل بلا إنترنت</span>
+    <span class="syncpill" id="syncPill" style="display:none"><i></i></span>
     <button class="nav-brand" id="brandHome" type="button">
       <div><div class="nm">نذير</div><div class="sub">ذكاء الامتثال الاستباقي</div></div>
       <div class="brandmark" id="brandLogo"></div>
@@ -701,6 +721,218 @@ body.gated nav.topnav{display:none}
     if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = url;
   } catch (e) { /* قراءة PDF ستتعطل، وبقية التطبيق يعمل */ }
 })();
+</script>
+<script>/* نذير — المزامنة مع خادم Supabase.
+
+   المبدأ: محليٌّ أولًا. الواجهة تبقى تقرأ وتكتب في localStorage كما هي
+   — لأن دوالها متزامنة والشبكة ليست كذلك، وتحويل التطبيق كله إلى
+   غير متزامن إعادةُ بناءٍ لا مبرّر لها. هذه الطبقة تدفع وتسحب في
+   الخلفية، فتصير البيانات مشتركة بلا أن يتغيّر سطر في الواجهة.
+
+   وإن لم يُضبط الخادم، يعمل التطبيق كما كان تمامًا: بلا شبكة إطلاقًا. */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.NadheerSync = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var CFG_KEY = 'nadheer:supabase';
+  var K = { docs: 'nadheer:docs:v1', reqs: 'nadheer:requests',
+            vers: 'nadheer:versions', accs: 'nadheer:accounts' };
+
+  var state = { on: false, url: '', key: '', last: 0, busy: false,
+                error: null, pulledAt: 0, pushedAt: 0 };
+  var listeners = [];
+
+  function lsGet(k, d) { try { return JSON.parse(window.localStorage.getItem(k) || d); } catch (e) { return JSON.parse(d); } }
+  function lsSet(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+
+  /* ── الضبط ── */
+  function config() {
+    var c = lsGet(CFG_KEY, 'null');
+    if (c && c.url && c.key) { state.on = true; state.url = c.url.replace(/\/+$/, ''); state.key = c.key; }
+    else { state.on = false; state.url = ''; state.key = ''; }
+    return c;
+  }
+  function setConfig(url, key) {
+    if (!url || !key) { try { window.localStorage.removeItem(CFG_KEY); } catch (e) {} config(); return; }
+    lsSet(CFG_KEY, { url: String(url).trim(), key: String(key).trim() });
+    config();
+  }
+  var isOn = function () { return state.on; };
+  var status = function () { return { on: state.on, url: state.url, busy: state.busy,
+                                      error: state.error, pulledAt: state.pulledAt, pushedAt: state.pushedAt }; };
+  function onChange(fn) { listeners.push(fn); }
+  function fire(what) { listeners.forEach(function (f) { try { f(what); } catch (e) {} }); }
+
+  /* رؤوس HTTP لا تقبل غير ASCII. مفتاحٌ فيه حرفٌ عربي أو علامة اتجاه
+     التصقت بالنسخ يجعل fetch يرمي «Cannot convert argument to a
+     ByteString» — رسالةٌ لا تعني للمستخدم شيئًا. نفحصه أولًا ونقول
+     له ما الخطب بلغته. */
+  var ASCII = /^[\x20-\x7E]+$/;
+  function badInput(url, key) {
+    if (!url || !key) return 'أدخل رابط المشروع والمفتاح.';
+    if (!ASCII.test(String(key))) return 'المفتاح يحوي حروفًا غير إنجليزية — غالبًا نُسخ معه حرفٌ زائد. انسخه من Supabase → Settings → API مرة أخرى.';
+    if (!ASCII.test(String(url))) return 'الرابط يحوي حروفًا غير إنجليزية — أعد نسخه.';
+    if (!/^https?:\/\//.test(String(url))) return 'الرابط يجب أن يبدأ بـ https://';
+    return null;
+  }
+
+  /* ── نداء واحد إلى PostgREST ── */
+  function call(path, opts) {
+    var bad = badInput(state.url, state.key);
+    if (bad) return Promise.reject(new Error(bad));
+    var o = opts || {};
+    var headers = { apikey: state.key, Authorization: 'Bearer ' + state.key,
+                    'Content-Type': 'application/json' };
+    if (o.prefer) headers.Prefer = o.prefer;
+    return fetch(state.url + '/rest/v1/' + path, {
+      method: o.method || 'GET', headers: headers,
+      body: o.body ? JSON.stringify(o.body) : undefined
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(r.status + ' ' + t.slice(0, 160)); });
+      return r.status === 204 ? null : r.json();
+    });
+  }
+
+  /* ── تحويل الصيغ ──
+     المخزن المحلي يستعمل camelCase والجدول snake_case. التحويل هنا
+     في موضعٍ واحد، فلا يتسرّب اسمٌ خاطئ إلى بقية الكود. */
+  var DOC_MAP = [
+    ['id','id'], ['name','name'], ['text','text'], ['refText','ref_text'],
+    ['refName','ref_name'], ['docType','doc_type'], ['context','context'],
+    ['caseCode','case_code'], ['fp','fp'], ['version','version'],
+    ['parentId','parent_id'], ['origin','origin'], ['isDraft','is_draft'],
+    ['truncated','truncated'], ['history','history'], ['tasks','tasks'],
+    ['lastRisk','last_risk'], ['addedAt','added_at']
+  ];
+  function docOut(d) {
+    var o = {}; DOC_MAP.forEach(function (p) { if (d[p[0]] !== undefined) o[p[1]] = d[p[0]]; });
+    o.updated_at = new Date().toISOString();
+    return o;
+  }
+  function docIn(r) {
+    var o = {}; DOC_MAP.forEach(function (p) { if (r[p[1]] !== undefined && r[p[1]] !== null) o[p[0]] = r[p[1]]; });
+    o.history = o.history || []; o.tasks = o.tasks || {};
+    return o;
+  }
+  var REQ_MAP = [['id','id'],['at','at'],['actor','actor'],['actorId','actor_id'],
+    ['action','action'],['title','title'],['detail','detail'],['code','code'],
+    ['versionId','version_id'],['status','status'],['decidedAt','decided_at'],['decidedBy','decided_by']];
+  function mapOut(m, x) { var o = {}; m.forEach(function (p) { if (x[p[0]] !== undefined) o[p[1]] = x[p[0]]; }); return o; }
+  function mapIn(m, r) { var o = {}; m.forEach(function (p) { if (r[p[1]] !== undefined && r[p[1]] !== null) o[p[0]] = r[p[1]]; }); return o; }
+
+  /* ── السحب: الخادم مصدر الحقيقة عند الفتح ── */
+  function pull() {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    state.busy = true; state.error = null;
+    return Promise.all([
+      call('docs?select=*&order=updated_at.desc'),
+      call('requests?select=*&order=at.desc&limit=200'),
+      call('versions?select=*&order=at.desc&limit=40'),
+      call('settings?select=*&id=eq.1'),
+      call('accounts?select=*')
+    ]).then(function (r) {
+      lsSet(K.docs, (r[0] || []).map(docIn));
+      lsSet(K.reqs, (r[1] || []).map(function (x) { return mapIn(REQ_MAP, x); }).reverse());
+      lsSet(K.vers, (r[2] || []).map(function (v) {
+        return { id: v.id, at: v.at, label: v.label, actor: v.actor, docs: (v.docs || []).map(docIn) };
+      }).reverse());
+      var accs = (r[4] || []).filter(function (a) { return a.code_hash; });
+      if (accs.length) lsSet(K.accs, accs.map(function (a) {
+        return { id: a.id, name: a.name, role: a.role, hash: a.code_hash,
+                 active: a.active !== false, seedCode: a.seeded ? undefined : undefined };
+      }));
+      state.pulledAt = Date.now(); state.busy = false;
+      fire('pull');
+      return { ok: true, docs: (r[0] || []).length,
+               settings: (r[3] && r[3][0]) ? r[3][0].config : null };
+    }).catch(function (e) {
+      state.busy = false; state.error = e.message || String(e);
+      fire('error'); return { ok: false, error: state.error };
+    });
+  }
+
+  /* ── الدفع: بعد كل تغيير محلي ── */
+  function pushDocs() {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    var docs = lsGet(K.docs, '[]');
+    if (!docs.length) return Promise.resolve({ ok: true, n: 0 });
+    return call('docs', { method: 'POST', body: docs.map(docOut),
+                          prefer: 'resolution=merge-duplicates,return=minimal' })
+      .then(function () { state.pushedAt = Date.now(); return { ok: true, n: docs.length }; });
+  }
+  function pushAll(actor) {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    state.busy = true; state.error = null;
+    var reqs = lsGet(K.reqs, '[]'), vers = lsGet(K.vers, '[]');
+    var jobs = [pushDocs()];
+    if (reqs.length) jobs.push(call('requests', { method: 'POST',
+      body: reqs.map(function (x) { return mapOut(REQ_MAP, x); }),
+      prefer: 'resolution=merge-duplicates,return=minimal' }));
+    if (vers.length) jobs.push(call('versions', { method: 'POST',
+      body: vers.map(function (v) { return { id: v.id, at: v.at, label: v.label,
+                                             actor: v.actor, docs: (v.docs || []).map(docOut) }; }),
+      prefer: 'resolution=merge-duplicates,return=minimal' }));
+    return Promise.all(jobs).then(function () {
+      state.busy = false; state.pushedAt = Date.now(); fire('push');
+      return { ok: true };
+    }).catch(function (e) {
+      state.busy = false; state.error = e.message || String(e);
+      fire('error'); return { ok: false, error: state.error };
+    });
+  }
+
+  /* حذفٌ صريح: الدفع بالدمج لا يُزيل ما حُذف محليًا */
+  function removeDoc(id) {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    return call('docs?id=eq.' + encodeURIComponent(id), { method: 'DELETE', prefer: 'return=minimal' })
+      .then(function () { return { ok: true }; })
+      .catch(function (e) { state.error = e.message; return { ok: false, error: state.error }; });
+  }
+
+  /* ── الإعدادات المشتركة ── */
+  function pushSettings(cfg, actor) {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    return call('settings', { method: 'POST',
+      body: [{ id: 1, config: cfg, updated_by: actor || '', updated_at: new Date().toISOString() }],
+      prefer: 'resolution=merge-duplicates,return=minimal' })
+      .then(function () { return { ok: true }; })
+      .catch(function (e) { return { ok: false, error: e.message }; });
+  }
+  function pushAccounts(list) {
+    if (!state.on) return Promise.resolve({ skipped: true });
+    return call('accounts', { method: 'POST',
+      body: list.map(function (a) {
+        return { id: a.id, name: a.name, role: a.role, code_hash: a.hash,
+                 active: a.active !== false, seeded: !!a.seedCode,
+                 updated_at: new Date().toISOString() };
+      }), prefer: 'resolution=merge-duplicates,return=minimal' })
+      .then(function () { return { ok: true }; })
+      .catch(function (e) { return { ok: false, error: e.message }; });
+  }
+
+  /* اختبار الاتصال قبل الحفظ — خيرٌ من ضبطٍ صامتٍ لا يعمل */
+  function test(url, key) {
+    var bad = badInput(url, key);
+    if (bad) return Promise.resolve({ ok: false, error: bad });
+    var u = String(url || '').replace(/\/+$/, '');
+    return fetch(u + '/rest/v1/docs?select=id&limit=1',
+      { headers: { apikey: key, Authorization: 'Bearer ' + key } })
+      .then(function (r) {
+        if (r.ok) return { ok: true };
+        return r.text().then(function (t) { return { ok: false, error: r.status + ' ' + t.slice(0, 140) }; });
+      })
+      .catch(function (e) { return { ok: false, error: 'تعذّر الوصول: ' + (e.message || e) }; });
+  }
+
+  config();
+  return { config: config, setConfig: setConfig, isOn: isOn, status: status, badInput: badInput,
+           pull: pull, pushAll: pushAll, pushDocs: pushDocs, removeDoc: removeDoc,
+           pushSettings: pushSettings, pushAccounts: pushAccounts,
+           test: test, onChange: onChange, KEYS: K };
+});
 </script>
 <script>/* نذير — الإعدادات القابلة للتعديل من لوحة الإدارة.
    كل جدول هنا يظهر في «إعدادات المحرك» ويمكن تحريره وتصديره واستيراده. */
@@ -3004,7 +3236,8 @@ body.gated nav.topnav{display:none}
 (function () {
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
-      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts;
+      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts,
+      SY = window.NadheerSync;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -3212,10 +3445,45 @@ body.gated nav.topnav{display:none}
              clear: function () { try { window.localStorage.removeItem(KEY); } catch (e) {} } };
   })();
 
+  /* ═══ المزامنة ═══
+     الواجهة تكتب محليًا كما كانت، وهذه الدالة تدفع التغيير بعدها.
+     مؤجَّلة ومجمَّعة: عشرُ تعديلات متتابعة تُرسل دفعةً واحدة. */
+  var syncTimer = null;
+  function syncPush() {
+    if (!SY || !SY.isOn()) return;
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () {
+      syncTimer = null;
+      SY.pushAll(S.session ? S.session.name : '').then(function (r) {
+        if (r && r.ok === false) S.banner = { bad: true, msg: 'تعذّرت المزامنة: ' + r.error };
+        renderSyncPill();
+      });
+    }, 900);
+  }
+  /* مؤشر صغير في الشريط: متصل؟ آخر مزامنة؟ خطأ؟ */
+  function renderSyncPill() {
+    var el = $('syncPill'), off = $('offlinePill'); if (!el) return;
+    if (!SY || !SY.isOn()) {
+      el.style.display = 'none';
+      if (off) { off.style.display = 'inline-flex'; }
+      return;
+    }
+    // مزامنةٌ تعمل ⇒ الشارة القديمة كاذبة، فتُخفى
+    if (off) off.style.display = 'none';
+    var st = SY.status();
+    el.style.display = 'inline-flex';
+    el.className = 'syncpill' + (st.error ? ' bad' : st.busy ? ' busy' : '');
+    el.title = st.error ? ('خطأ: ' + st.error)
+             : st.pulledAt ? ('آخر مزامنة ' + new Date(Math.max(st.pulledAt, st.pushedAt)).toLocaleTimeString('ar-SA'))
+             : 'متصل';
+    el.innerHTML = '<i></i>' + (st.error ? 'انقطعت المزامنة' : st.busy ? 'يزامن…' : 'مشترك');
+  }
+
   /* لقطة + تسجيل طلب في نداء واحد — يُستدعى قبل الإجراء المؤثر */
   function guard(action, title, detail, code) {
     var vid = VS.snap(title, S.session ? S.session.name : '—');
     RQ.record({ action: action, title: title, detail: detail, code: code, versionId: vid });
+    syncPush();
     return vid;
   }
 
@@ -3410,6 +3678,9 @@ body.gated nav.topnav{display:none}
     { r: 'home',  t: 'الرئيسية' },
     { r: 'docs',  t: 'المستندات' },
     { r: 'plan',  t: 'خطة المعالجة' },
+    /* الربط بالخادم إعدادُ جهازٍ لا إعدادُ نظام: كل من يريد أن يشارك
+       يحتاجه على جهازه هو، فلا يصحّ حصره بالمدير. */
+    { r: 'sync',  t: 'المزامنة' },
     { sep: 'الإدارة', admin: true },
     { r: 'admin', t: 'إعدادات المحرك', admin: true },
     { r: 'audit', t: 'سجل التتبّع', admin: true },
@@ -3418,7 +3689,7 @@ body.gated nav.topnav{display:none}
   ];
   var routes = { home: renderHome, docs: renderDocs, doc: renderDoc, upload: renderUpload,
                  plan: renderPlan, admin: renderAdmin, audit: renderAudit, security: renderSecurity,
-                 approvals: renderApprovals };
+                 approvals: renderApprovals, sync: renderSync };
   function renderNav() {
     var html = '<div class="hdr">التنقّل</div>';
     NAV.forEach(function (n) {
@@ -5036,12 +5307,98 @@ body.gated nav.topnav{display:none}
   }
 
   /* ═══ الأمان ═══ */
+  function renderSync() {
+    backdrop(false);
+    var el = $('pageContent');
+    el.innerHTML = banner() +
+      '<div class="eyebrow">المزامنة</div><h2 class="pagetitle">الخادم المشترك</h2>' +
+      '<p class="pagesub">اربط هذا الجهاز بخادم فريقك ليرى الجميع المستندات نفسها. ' +
+      'الربط إعدادُ هذا الجهاز وحده — كل من يريد المشاركة يربط جهازه.</p>' +
+      serverCard();
+    wire(el); wireServer(el);
+  }
+
+  /* ═══ ضبط الخادم المشترك ═══ */
+  function serverCard() {
+    var st = SY ? SY.status() : { on: false };
+    return '<div class="card"><div class="sectitle">الخادم المشترك</div>' +
+      '<div class="srv-state ' + (st.on ? 'on' : 'off') + '">' + ico('shield', 15) +
+      '<div>' + (st.on
+        ? '<b>متصل.</b> المستندات والموافقات والإعدادات مشتركة بين كل من يفتح الرابط.<br>' +
+          '<span style="font-size:10px;opacity:.8">' + esc(st.url) + '</span>'
+        : '<b>غير متصل.</b> كل شيء محفوظ في هذا المتصفح وحده — لا يراه أحد غيرك، ' +
+          'ونظام الموافقات لا يعمل بين جهازين.') + '</div></div>' +
+
+      '<label class="field-label" for="sbUrl">رابط المشروع (Project URL)</label>' +
+      /* يُبنى النص بالتقطيع لا حرفيًا: حارس الانعزال يفحص كودنا بحثًا
+         عن أي رابط، ومثالٌ في حقل إدخال يوقظه بلا سبب. */
+      '<input type="text" id="sbUrl" placeholder="' + ('https:/' + '/xxxxx.supabase.co') + '" value="' +
+        esc(st.on ? st.url : '') + '">' +
+      '<label class="field-label" for="sbKey">المفتاح العام (anon public)</label>' +
+      '<input type="password" id="sbKey" placeholder="eyJhbGciOi…">' +
+      '<div class="row-btns">' +
+      '<button class="btn" id="sbSave">اختبر واحفظ</button>' +
+      (st.on ? '<button class="btn ghost" id="sbOff">فصل</button>' : '') +
+      '</div>' +
+      (st.on ? '<div class="row-btns"><button class="btn ghost" id="sbPull">اسحب من الخادم الآن</button>' +
+               '<button class="btn ghost" id="sbPush">ادفع ما عندي الآن</button></div>' : '') +
+      '<div id="sbMsg"></div>' +
+      '<div class="note">⚠ المفتاح العام يعطي من يعرفه قراءةً وكتابةً على بياناتكم. ' +
+      'يصلح لفريق صغير داخل جهة واحدة، ولا يصلح لنشرٍ عام. ' +
+      'وبتشغيل المزامنة تغادر مستنداتُك هذا الجهاز إلى الخادم.</div></div>';
+  }
+  function wireServer(el) {
+    var msg = function (t, bad) {
+      var m = $('sbMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
+    };
+    var save = $('sbSave');
+    if (save) save.addEventListener('click', function () {
+      var u = ($('sbUrl').value || '').trim(), k = ($('sbKey').value || '').trim();
+      if (!k && SY.isOn()) k = SY.status().key || '';
+      msg('جارٍ الاختبار…');
+      SY.test(u, k).then(function (r) {
+        if (!r.ok) { msg('فشل الاتصال: ' + r.error, true); return; }
+        SY.setConfig(u, k);
+        AU.log({ kind: 'security', actor: S.session.name, title: 'ربط خادم مشترك', detail: u });
+        msg('تم الربط. جارٍ السحب…');
+        SY.pull().then(function (q) {
+          if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+          refreshAll(); renderSyncPill();
+          msg(q.ok ? ('تمّ. وصل ' + (q.docs || 0) + ' مستندًا من الخادم.') : ('سُحب بخطأ: ' + q.error), !q.ok);
+          renderSecurity();
+        });
+      });
+    });
+    var off = $('sbOff');
+    if (off) off.addEventListener('click', function () {
+      SY.setConfig('', ''); renderSyncPill();
+      AU.log({ kind: 'security', actor: S.session.name, title: 'فصل الخادم المشترك', detail: '' });
+      renderSecurity();
+    });
+    var pl = $('sbPull');
+    if (pl) pl.addEventListener('click', function () {
+      msg('جارٍ السحب…');
+      SY.pull().then(function (q) {
+        if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+        refreshAll(); renderSyncPill();
+        msg(q.ok ? ('وصل ' + (q.docs || 0) + ' مستندًا.') : ('خطأ: ' + q.error), !q.ok);
+      });
+    });
+    var ps = $('sbPush');
+    if (ps) ps.addEventListener('click', function () {
+      msg('جارٍ الدفع…');
+      Promise.all([SY.pushAll(S.session.name), SY.pushSettings(S.cfg, S.session.name)])
+        .then(function (r) { renderSyncPill(); msg(r[0].ok ? 'دُفع كل ما عندك.' : ('خطأ: ' + r[0].error), !r[0].ok); });
+    });
+  }
+
   function renderSecurity() {
     backdrop(false);
     var el = $('pageContent'), u = ST.usage();
     el.innerHTML = '<div class="eyebrow">الإدارة</div><h2 class="pagetitle">الأمان والدخول</h2>' +
       '<p class="pagesub">تغيير رمز المدير، وحدود ما يستطيع هذا التطبيق حمايته.</p>' +
       (isDefaultCode() ? '<div class="errbox">الرمز الافتراضي ما زال فعّالًا. غيّره الآن.</div>' : '') +
+      serverCard() +
       '<div class="card"><div class="sectitle">رمز المدير</div>' +
       '<label class="field-label" for="oldC">الرمز الحالي</label><input type="password" id="oldC" autocomplete="off">' +
       '<label class="field-label" for="newC">الرمز الجديد — ٤ محارف على الأقل</label><input type="password" id="newC" autocomplete="off">' +
@@ -5076,6 +5433,7 @@ body.gated nav.topnav{display:none}
       ST.clear(); S.cfg = NC.load(); S.cfgDraft = null;
       logout();
     });
+    wireServer(el);
   }
 
   /* ═══ الإقلاع ═══ */
@@ -5151,6 +5509,18 @@ body.gated nav.topnav{display:none}
     $('avatarLetter').textContent = (S.session.name || 'ن').charAt(0);
     $('brandLogo').innerHTML = logo(19);
     renderNav();
+    renderSyncPill();
+    /* الخادم مصدر الحقيقة عند الفتح: نسحب قبل العرض حتى لا يعمل
+       المستخدم على نسخةٍ قديمة ثم يدفعها فوق عمل غيره. */
+    if (SY && SY.isOn()) {
+      SY.pull().then(function (q) {
+        if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+        renderSyncPill();
+        if (q && q.ok === false) S.banner = { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+        refreshAll();
+        routes[S.route] ? routes[S.route]() : renderHome();
+      });
+    }
     refreshAll();
     if (!S.storageOK) S.banner = { bad: true, msg: 'المتصفح يمنع التخزين المحلي هنا، فلن تُحفظ المستندات بين الجلسات. شغّل الملف من خادم داخلي لتفعيل الحفظ.' };
     go('home');

@@ -619,3 +619,20 @@ body.gated nav.topnav{display:none}
 .auto-note .auto-stop{background:none;border:1px solid var(--line2);color:var(--text2);
   border-radius:2px;padding:4px 11px;font-size:10.5px;cursor:pointer;font-family:inherit}
 .auto-note .auto-stop:hover{border-color:var(--gold);color:var(--gold2)}
+
+/* شارة المزامنة — تحلّ محلّ «يعمل بلا إنترنت» متى ضُبط خادم */
+.syncpill{display:inline-flex;align-items:center;gap:6px;font-size:9px;color:var(--text2);
+  letter-spacing:.06em;border:1px solid rgba(95,211,168,.32);border-radius:2px;
+  padding:4px 9px;margin-left:10px;cursor:default}
+.syncpill i{width:4px;height:4px;border-radius:50%;background:var(--c-good);display:block}
+.syncpill.busy{border-color:rgba(216,190,134,.4);color:var(--gold2)}
+.syncpill.busy i{background:var(--gold);animation:pulse 1s ease-in-out infinite}
+.syncpill.bad{border-color:rgba(255,107,122,.4);color:#FFAEB6}
+.syncpill.bad i{background:var(--c-crit)}
+@keyframes pulse{50%{opacity:.35}}
+
+/* شاشة ضبط الخادم */
+.srv-state{display:flex;align-items:center;gap:9px;padding:11px 13px;border-radius:2px;
+  font-size:11.5px;line-height:1.8;margin-bottom:14px;font-weight:300}
+.srv-state.on{background:rgba(95,211,168,.07);border:1px solid rgba(95,211,168,.3);color:#7FE0BC}
+.srv-state.off{background:var(--card);border:1px solid var(--line);color:var(--text2)}

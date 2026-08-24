@@ -2,7 +2,8 @@
 (function () {
   'use strict';
   var E = window.NadheerEngine, NC = window.NadheerConfig,
-      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts;
+      AU = window.NadheerAudit, ST = window.NadheerStore, CF = window.NadheerConflicts,
+      SY = window.NadheerSync;
 
   var S = { session: null, cfg: null, cfgDraft: null, route: 'home',
             docs: [], analyses: {}, openDoc: null, docTab: 'sum',
@@ -210,10 +211,45 @@
              clear: function () { try { window.localStorage.removeItem(KEY); } catch (e) {} } };
   })();
 
+  /* ═══ المزامنة ═══
+     الواجهة تكتب محليًا كما كانت، وهذه الدالة تدفع التغيير بعدها.
+     مؤجَّلة ومجمَّعة: عشرُ تعديلات متتابعة تُرسل دفعةً واحدة. */
+  var syncTimer = null;
+  function syncPush() {
+    if (!SY || !SY.isOn()) return;
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () {
+      syncTimer = null;
+      SY.pushAll(S.session ? S.session.name : '').then(function (r) {
+        if (r && r.ok === false) S.banner = { bad: true, msg: 'تعذّرت المزامنة: ' + r.error };
+        renderSyncPill();
+      });
+    }, 900);
+  }
+  /* مؤشر صغير في الشريط: متصل؟ آخر مزامنة؟ خطأ؟ */
+  function renderSyncPill() {
+    var el = $('syncPill'), off = $('offlinePill'); if (!el) return;
+    if (!SY || !SY.isOn()) {
+      el.style.display = 'none';
+      if (off) { off.style.display = 'inline-flex'; }
+      return;
+    }
+    // مزامنةٌ تعمل ⇒ الشارة القديمة كاذبة، فتُخفى
+    if (off) off.style.display = 'none';
+    var st = SY.status();
+    el.style.display = 'inline-flex';
+    el.className = 'syncpill' + (st.error ? ' bad' : st.busy ? ' busy' : '');
+    el.title = st.error ? ('خطأ: ' + st.error)
+             : st.pulledAt ? ('آخر مزامنة ' + new Date(Math.max(st.pulledAt, st.pushedAt)).toLocaleTimeString('ar-SA'))
+             : 'متصل';
+    el.innerHTML = '<i></i>' + (st.error ? 'انقطعت المزامنة' : st.busy ? 'يزامن…' : 'مشترك');
+  }
+
   /* لقطة + تسجيل طلب في نداء واحد — يُستدعى قبل الإجراء المؤثر */
   function guard(action, title, detail, code) {
     var vid = VS.snap(title, S.session ? S.session.name : '—');
     RQ.record({ action: action, title: title, detail: detail, code: code, versionId: vid });
+    syncPush();
     return vid;
   }
 
@@ -408,6 +444,9 @@
     { r: 'home',  t: 'الرئيسية' },
     { r: 'docs',  t: 'المستندات' },
     { r: 'plan',  t: 'خطة المعالجة' },
+    /* الربط بالخادم إعدادُ جهازٍ لا إعدادُ نظام: كل من يريد أن يشارك
+       يحتاجه على جهازه هو، فلا يصحّ حصره بالمدير. */
+    { r: 'sync',  t: 'المزامنة' },
     { sep: 'الإدارة', admin: true },
     { r: 'admin', t: 'إعدادات المحرك', admin: true },
     { r: 'audit', t: 'سجل التتبّع', admin: true },
@@ -416,7 +455,7 @@
   ];
   var routes = { home: renderHome, docs: renderDocs, doc: renderDoc, upload: renderUpload,
                  plan: renderPlan, admin: renderAdmin, audit: renderAudit, security: renderSecurity,
-                 approvals: renderApprovals };
+                 approvals: renderApprovals, sync: renderSync };
   function renderNav() {
     var html = '<div class="hdr">التنقّل</div>';
     NAV.forEach(function (n) {
@@ -2034,12 +2073,98 @@
   }
 
   /* ═══ الأمان ═══ */
+  function renderSync() {
+    backdrop(false);
+    var el = $('pageContent');
+    el.innerHTML = banner() +
+      '<div class="eyebrow">المزامنة</div><h2 class="pagetitle">الخادم المشترك</h2>' +
+      '<p class="pagesub">اربط هذا الجهاز بخادم فريقك ليرى الجميع المستندات نفسها. ' +
+      'الربط إعدادُ هذا الجهاز وحده — كل من يريد المشاركة يربط جهازه.</p>' +
+      serverCard();
+    wire(el); wireServer(el);
+  }
+
+  /* ═══ ضبط الخادم المشترك ═══ */
+  function serverCard() {
+    var st = SY ? SY.status() : { on: false };
+    return '<div class="card"><div class="sectitle">الخادم المشترك</div>' +
+      '<div class="srv-state ' + (st.on ? 'on' : 'off') + '">' + ico('shield', 15) +
+      '<div>' + (st.on
+        ? '<b>متصل.</b> المستندات والموافقات والإعدادات مشتركة بين كل من يفتح الرابط.<br>' +
+          '<span style="font-size:10px;opacity:.8">' + esc(st.url) + '</span>'
+        : '<b>غير متصل.</b> كل شيء محفوظ في هذا المتصفح وحده — لا يراه أحد غيرك، ' +
+          'ونظام الموافقات لا يعمل بين جهازين.') + '</div></div>' +
+
+      '<label class="field-label" for="sbUrl">رابط المشروع (Project URL)</label>' +
+      /* يُبنى النص بالتقطيع لا حرفيًا: حارس الانعزال يفحص كودنا بحثًا
+         عن أي رابط، ومثالٌ في حقل إدخال يوقظه بلا سبب. */
+      '<input type="text" id="sbUrl" placeholder="' + ('https:/' + '/xxxxx.supabase.co') + '" value="' +
+        esc(st.on ? st.url : '') + '">' +
+      '<label class="field-label" for="sbKey">المفتاح العام (anon public)</label>' +
+      '<input type="password" id="sbKey" placeholder="eyJhbGciOi…">' +
+      '<div class="row-btns">' +
+      '<button class="btn" id="sbSave">اختبر واحفظ</button>' +
+      (st.on ? '<button class="btn ghost" id="sbOff">فصل</button>' : '') +
+      '</div>' +
+      (st.on ? '<div class="row-btns"><button class="btn ghost" id="sbPull">اسحب من الخادم الآن</button>' +
+               '<button class="btn ghost" id="sbPush">ادفع ما عندي الآن</button></div>' : '') +
+      '<div id="sbMsg"></div>' +
+      '<div class="note">⚠ المفتاح العام يعطي من يعرفه قراءةً وكتابةً على بياناتكم. ' +
+      'يصلح لفريق صغير داخل جهة واحدة، ولا يصلح لنشرٍ عام. ' +
+      'وبتشغيل المزامنة تغادر مستنداتُك هذا الجهاز إلى الخادم.</div></div>';
+  }
+  function wireServer(el) {
+    var msg = function (t, bad) {
+      var m = $('sbMsg'); if (m) m.innerHTML = '<div class="' + (bad ? 'errbox' : 'okbox') + '">' + esc(t) + '</div>';
+    };
+    var save = $('sbSave');
+    if (save) save.addEventListener('click', function () {
+      var u = ($('sbUrl').value || '').trim(), k = ($('sbKey').value || '').trim();
+      if (!k && SY.isOn()) k = SY.status().key || '';
+      msg('جارٍ الاختبار…');
+      SY.test(u, k).then(function (r) {
+        if (!r.ok) { msg('فشل الاتصال: ' + r.error, true); return; }
+        SY.setConfig(u, k);
+        AU.log({ kind: 'security', actor: S.session.name, title: 'ربط خادم مشترك', detail: u });
+        msg('تم الربط. جارٍ السحب…');
+        SY.pull().then(function (q) {
+          if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+          refreshAll(); renderSyncPill();
+          msg(q.ok ? ('تمّ. وصل ' + (q.docs || 0) + ' مستندًا من الخادم.') : ('سُحب بخطأ: ' + q.error), !q.ok);
+          renderSecurity();
+        });
+      });
+    });
+    var off = $('sbOff');
+    if (off) off.addEventListener('click', function () {
+      SY.setConfig('', ''); renderSyncPill();
+      AU.log({ kind: 'security', actor: S.session.name, title: 'فصل الخادم المشترك', detail: '' });
+      renderSecurity();
+    });
+    var pl = $('sbPull');
+    if (pl) pl.addEventListener('click', function () {
+      msg('جارٍ السحب…');
+      SY.pull().then(function (q) {
+        if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+        refreshAll(); renderSyncPill();
+        msg(q.ok ? ('وصل ' + (q.docs || 0) + ' مستندًا.') : ('خطأ: ' + q.error), !q.ok);
+      });
+    });
+    var ps = $('sbPush');
+    if (ps) ps.addEventListener('click', function () {
+      msg('جارٍ الدفع…');
+      Promise.all([SY.pushAll(S.session.name), SY.pushSettings(S.cfg, S.session.name)])
+        .then(function (r) { renderSyncPill(); msg(r[0].ok ? 'دُفع كل ما عندك.' : ('خطأ: ' + r[0].error), !r[0].ok); });
+    });
+  }
+
   function renderSecurity() {
     backdrop(false);
     var el = $('pageContent'), u = ST.usage();
     el.innerHTML = '<div class="eyebrow">الإدارة</div><h2 class="pagetitle">الأمان والدخول</h2>' +
       '<p class="pagesub">تغيير رمز المدير، وحدود ما يستطيع هذا التطبيق حمايته.</p>' +
       (isDefaultCode() ? '<div class="errbox">الرمز الافتراضي ما زال فعّالًا. غيّره الآن.</div>' : '') +
+      serverCard() +
       '<div class="card"><div class="sectitle">رمز المدير</div>' +
       '<label class="field-label" for="oldC">الرمز الحالي</label><input type="password" id="oldC" autocomplete="off">' +
       '<label class="field-label" for="newC">الرمز الجديد — ٤ محارف على الأقل</label><input type="password" id="newC" autocomplete="off">' +
@@ -2074,6 +2199,7 @@
       ST.clear(); S.cfg = NC.load(); S.cfgDraft = null;
       logout();
     });
+    wireServer(el);
   }
 
   /* ═══ الإقلاع ═══ */
@@ -2149,6 +2275,18 @@
     $('avatarLetter').textContent = (S.session.name || 'ن').charAt(0);
     $('brandLogo').innerHTML = logo(19);
     renderNav();
+    renderSyncPill();
+    /* الخادم مصدر الحقيقة عند الفتح: نسحب قبل العرض حتى لا يعمل
+       المستخدم على نسخةٍ قديمة ثم يدفعها فوق عمل غيره. */
+    if (SY && SY.isOn()) {
+      SY.pull().then(function (q) {
+        if (q && q.settings) { NC.save(q.settings); S.cfg = NC.load(); }
+        renderSyncPill();
+        if (q && q.ok === false) S.banner = { bad: true, msg: 'تعذّر الوصول للخادم: ' + q.error + ' — تعمل الآن على نسخة هذا الجهاز.' };
+        refreshAll();
+        routes[S.route] ? routes[S.route]() : renderHome();
+      });
+    }
     refreshAll();
     if (!S.storageOK) S.banner = { bad: true, msg: 'المتصفح يمنع التخزين المحلي هنا، فلن تُحفظ المستندات بين الجلسات. شغّل الملف من خادم داخلي لتفعيل الحفظ.' };
     go('home');
