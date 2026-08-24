@@ -22,10 +22,12 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   const navCount = async () => { await page.click('#burgerBtn'); await page.waitForTimeout(130);
     const n = await page.locator('.navpanel .navlink[data-r]').count();
     await page.keyboard.press('Escape'); await page.waitForTimeout(130); return n; };
-  const login = async (role, val) => {
-    await page.click(`.role[data-role="${role}"]`); await page.waitForTimeout(160);
-    await page.fill(role === 'admin' ? '#gateCode' : '#gateName', val);
-    await page.click('#gateGo'); await page.waitForTimeout(450);
+  /* البوابة صارت أربعة حسابات لكلٍّ رمزه، بدل اختيار دورٍ مجرّد */
+  const CODES = { admin: 'ADMIN1', faisal: '1234FA', rawan: 'RA12', safiah: '1313SA' };
+  const login = async (acc) => {
+    await page.click(`.role[data-acc="${acc}"]`); await page.waitForTimeout(180);
+    await page.fill('#gateCode', CODES[acc]);
+    await page.click('#gateGo'); await page.waitForTimeout(500);
   };
   const addDoc = async (name, text, ref) => {
     await page.click('#pageContent [data-r="upload"]'); await page.waitForTimeout(300);
@@ -39,8 +41,8 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
 
   console.log('\n— الدخول والتبسيط —');
   ok(await page.locator('#gate.open').isVisible(), 'البوابة تظهر أولًا');
-  await login('user', 'فيصل');
-  ok(!(await page.locator('#gate.open').isVisible()), 'الدخول العادي يعمل');
+  await login('faisal');
+  ok(!(await page.locator('#gate.open').isVisible()), 'الدخول بحساب مستخدم يعمل');
   ok((await navCount()) === 3, 'المستخدم العادي يرى ٣ صفحات فقط (كانت ٧)');
 
   console.log('\n— الخلفية المتحركة —');
@@ -345,9 +347,9 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   console.log('\n— المدير —');
   await page.click('#burgerBtn'); await page.waitForTimeout(140);
   await page.click('#logoutBtn'); await page.waitForTimeout(400);
-  await login('admin', '1234');
+  await login('admin');
   ok((await page.locator('#userRole').textContent()) === 'مدير النظام', 'دخول المدير');
-  ok((await navCount()) === 6, 'المدير يرى ٦ صفحات');
+  ok((await navCount()) === 7, 'المدير يرى ٧ صفحات (منها الموافقات والنسخ)');
   await nav('docs');
   ok((await page.locator('.doc-card').count()) === 7, 'المستندات باقية بعد تبديل المستخدم');
   await nav('admin');
@@ -360,6 +362,43 @@ const FEEPOL = P('04-سياسة-الرسوم-الداخلية-نموذج-تجر�
   ok(logTxt.indexOf('تحديث مهمة معالجة') > -1, 'تحديث المهام مقيّد في السجل');
   ok(logTxt.indexOf('تعديل إعدادات المحرك') > -1, 'تعديل الإعدادات مقيّد');
   ok(logTxt.indexOf('تحليل مستند') > -1, 'التحاليل مقيّدة');
+
+  console.log('\n— الحسابات والموافقات —');
+  /* أربعة حسابات لكلٍّ رمزه، والمدير يراجع ما يفعله المستخدمون. */
+  await page.click('#burgerBtn'); await page.waitForTimeout(140);
+  await page.click('#logoutBtn'); await page.waitForTimeout(500);
+  ok((await page.locator('.role[data-acc]').count()) === 4, 'البوابة تعرض أربعة حسابات');
+  /* رمز خاطئ لا يدخل */
+  await page.click('.role[data-acc="rawan"]'); await page.waitForTimeout(180);
+  await page.fill('#gateCode', 'غلط'); await page.click('#gateGo'); await page.waitForTimeout(400);
+  ok(await page.locator('#gate.open').isVisible(), 'الرمز الخاطئ لا يفتح البوابة');
+  await page.fill('#gateCode', 'RA12'); await page.click('#gateGo'); await page.waitForTimeout(500);
+  ok(!(await page.locator('#gate.open').isVisible()), 'والرمز الصحيح يفتحها');
+
+  /* إجراء من مستخدم ⇒ يصل المدير */
+  await page.click('#pageContent [data-r="upload"]'); await page.waitForTimeout(320);
+  await page.fill('#docName', 'مستند روان');
+  await page.fill('#paste_doc1', 'المادة الأولى: يجب على المورد التسليم قبل تاريخ 2026-12-01.');
+  await page.click('#analyzeBtn'); await page.waitForTimeout(2200);
+  const docsAfterRawan = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return 0; }
+  });
+
+  await page.click('#burgerBtn'); await page.waitForTimeout(140);
+  await page.click('#logoutBtn'); await page.waitForTimeout(500);
+  await login('admin');
+  await nav('approvals');
+  const apTxt = await page.locator('#pageContent').textContent();
+  ok(apTxt.indexOf('الموافقات والنسخ') > -1, 'صفحة الموافقات تفتح فعلًا');
+  ok((await page.locator('[data-ok]').count()) >= 1, 'وفيها طلب بانتظار قرار المدير');
+
+  /* الإلغاء يرجّع الحالة السابقة فعلًا — لا مجرّد وسم */
+  await page.click('[data-no]'); await page.waitForTimeout(900);
+  const docsAfterRevert = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('nadheer:docs:v1') || '[]').length; } catch (e) { return -1; }
+  });
+  ok(docsAfterRevert === docsAfterRawan - 1,
+     'الإلغاء يرجّع اللقطة فيختفي المستند: ' + docsAfterRawan + ' → ' + docsAfterRevert);
 
   console.log('\n— الانعزال —');
   ok(net.length === 0, 'صفر طلبات شبكة' + (net.length ? ': ' + net.join(', ') : ''));

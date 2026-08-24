@@ -2225,7 +2225,9 @@ body.gated nav.topnav{display:none}
 
   return { list: list, get: get, add: add, update: update, remove: remove,
            recordRisk: recordRisk, delta: delta, setTask: setTask, taskOf: taskOf,
-           usage: usage, clear: clear, today: today, MAX_TEXT: MAX_TEXT };
+           usage: usage, clear: clear, today: today, MAX_TEXT: MAX_TEXT,
+           /* يصفّر كاش الذاكرة حتى تُقرأ النسخة المسترجَعة من التخزين */
+           reset: function () { mem = null; } };
 });
 </script>
 <script>/* نذير — كشف التعارض وإصدار التعديلات.
@@ -3095,38 +3097,167 @@ body.gated nav.topnav{display:none}
   var isDefaultCode = function () { return adminHash() === codeHash(DEFAULT_CODE); };
   var isAdmin = function () { return S.session && S.session.role === 'admin'; };
 
+
+  /* ═══════════ الحسابات ═══════════
+     أربعة حسابات: مدير + ثلاثة مستخدمين. الرموز مخزّنة كبصمة لا كنص،
+     لكن ذلك تعمية لا حماية: الملف يعمل بلا خادم، فمن يفتحه بمحرر
+     يستطيع تجاوز كل هذا. الغرض فصل الأدوار وتتبّع المسؤولية. */
+  var ACC = (function () {
+    var KEY = 'nadheer:accounts';
+    var SEED = [
+      { id: 'admin',  name: 'مدير النظام', role: 'admin', code: 'ADMIN1', active: true },
+      { id: 'faisal', name: 'فيصل',        role: 'user',  code: '1234FA', active: true },
+      { id: 'rawan',  name: 'روان',        role: 'user',  code: 'RA12',   active: true },
+      { id: 'safiah', name: 'صفية',        role: 'user',  code: '1313SA', active: true }
+    ];
+    function load() {
+      try {
+        var raw = window.localStorage.getItem(KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      var seeded = SEED.map(function (a) {
+        return { id: a.id, name: a.name, role: a.role, hash: codeHash(a.code), active: a.active, seedCode: a.code };
+      });
+      save(seeded);
+      return seeded;
+    }
+    function save(list) {
+      try { window.localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+    }
+    function all() { return load(); }
+    function get(id) {
+      var f = load().filter(function (a) { return a.id === id; });
+      return f.length ? f[0] : null;
+    }
+    function verify(id, code) {
+      var a = get(id);
+      return !!(a && a.active && codeHash(code || '') === a.hash);
+    }
+    function setCode(id, code) {
+      var list = load();
+      list.forEach(function (a) { if (a.id === id) { a.hash = codeHash(code); delete a.seedCode; } });
+      save(list);
+    }
+    function setActive(id, on) {
+      var list = load();
+      list.forEach(function (a) { if (a.id === id && a.id !== 'admin') a.active = !!on; });
+      save(list);
+    }
+    return { all: all, get: get, verify: verify, setCode: setCode, setActive: setActive };
+  })();
+
+  /* ═══════════ سجل النسخ ═══════════
+     لقطة كاملة قبل كل تغيير مؤثر — هي ما يجعل «الإلغاء» ممكنًا فعلًا. */
+  var VS = (function () {
+    var KEY = 'nadheer:versions', MAX = 40;
+    function load() { try { return JSON.parse(window.localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+    function save(l) { try { window.localStorage.setItem(KEY, JSON.stringify(l.slice(-MAX))); } catch (e) {} }
+    function snap(label, actor) {
+      var docs;
+      try { docs = JSON.parse(window.localStorage.getItem('nadheer:docs:v1') || '[]'); } catch (e) { docs = []; }
+      var v = { id: 'v' + Date.now() + Math.random().toString(36).slice(2, 6),
+                at: Date.now(), label: label || '', actor: actor || '—', docs: docs };
+      var l = load(); l.push(v); save(l);
+      return v.id;
+    }
+    function restore(vid) {
+      var l = load(), hit = null;
+      l.forEach(function (v) { if (v.id === vid) hit = v; });
+      if (!hit) return false;
+      snap('قبل الاسترجاع', S.session ? S.session.name : '—');
+      try { window.localStorage.setItem('nadheer:docs:v1', JSON.stringify(hit.docs)); } catch (e) { return false; }
+      if (ST.reset) ST.reset();        // تصفير الكاش حتى تُقرأ النسخة المسترجَعة
+      return true;
+    }
+    return { all: load, snap: snap, restore: restore,
+             clear: function () { try { window.localStorage.removeItem(KEY); } catch (e) {} } };
+  })();
+
+  /* ═══════════ طلبات الموافقة ═══════════
+     المستخدم يعمل بحرية، والإجراء يُنفَّذ فورًا — ثم يصل المدير إشعار
+     يقبله أو يلغيه. الإلغاء يرجّع اللقطة السابقة، فلا يكون القبول
+     مجرد كلام. الإجراءات القرائية لا تُسجَّل هنا حتى لا يغرق الصندوق. */
+  var RQ = (function () {
+    var KEY = 'nadheer:requests', MAX = 200;
+    function load() { try { return JSON.parse(window.localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+    function save(l) { try { window.localStorage.setItem(KEY, JSON.stringify(l.slice(-MAX))); } catch (e) {} }
+    function record(o) {
+      if (!S.session || S.session.role === 'admin') return null;   // فعل المدير لا يحتاج موافقة نفسه
+      var l = load();
+      l.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 5),
+               at: Date.now(), actor: S.session.name, actorId: S.session.id || '',
+               action: o.action || 'إجراء', title: o.title || '', detail: o.detail || '',
+               code: o.code || '', versionId: o.versionId || '', status: 'pending',
+               decidedAt: 0, decidedBy: '' });
+      save(l);
+      return true;
+    }
+    function pending() { return load().filter(function (r) { return r.status === 'pending'; }).reverse(); }
+    function decide(id, ok) {
+      var l = load(), hit = null;
+      l.forEach(function (r) { if (r.id === id) hit = r; });
+      if (!hit || hit.status !== 'pending') return { ok: false };
+      var reverted = false;
+      if (!ok && hit.versionId) reverted = VS.restore(hit.versionId);
+      hit.status = ok ? 'approved' : 'reverted';
+      hit.decidedAt = Date.now();
+      hit.decidedBy = S.session ? S.session.name : '—';
+      save(l);
+      AU.log({ kind: 'security', actor: S.session ? S.session.name : '—', code: hit.code,
+               title: ok ? 'اعتماد إجراء' : 'إلغاء إجراء',
+               detail: hit.actor + ' · ' + hit.title + (!ok ? (reverted ? ' · أُرجعت الحالة السابقة' : ' · بلا لقطة للإرجاع') : '') });
+      return { ok: true, reverted: reverted };
+    }
+    return { record: record, pending: pending, all: load, decide: decide,
+             clear: function () { try { window.localStorage.removeItem(KEY); } catch (e) {} } };
+  })();
+
+  /* لقطة + تسجيل طلب في نداء واحد — يُستدعى قبل الإجراء المؤثر */
+  function guard(action, title, detail, code) {
+    var vid = VS.snap(title, S.session ? S.session.name : '—');
+    RQ.record({ action: action, title: title, detail: detail, code: code, versionId: vid });
+    return vid;
+  }
+
   var gateRole = 'user';
   function renderGate() {
     $('gate').classList.add('open');
     document.body.classList.add('gated');
     backdrop(true, 'gate');
+    var accs = ACC.all();
     $('gate').innerHTML = '<div class="gate-card">' +
       '<div class="gate-mark">' + logo(40, 1.05) + '</div>' +
       '<h1>نذير</h1><div class="tag">ذكاء الامتثال الاستباقي</div>' +
       '<div class="roles">' +
-      '<button type="button" class="role' + (gateRole === 'user' ? ' sel' : '') + '" data-role="user">' +
-        ico('user', 21) + '<div class="rn">دخول عادي</div><div class="rd">تحليل ومتابعة وتصدير</div></button>' +
-      '<button type="button" class="role' + (gateRole === 'admin' ? ' sel' : '') + '" data-role="admin">' +
-        ico('shield', 21) + '<div class="rn">مدير النظام</div><div class="rd">تعديل المحرك والتتبّع</div></button>' +
+      accs.map(function (a) {
+        return '<button type="button" class="role' + (gateRole === a.id ? ' sel' : '') +
+          '" data-acc="' + a.id + '"' + (a.active ? '' : ' disabled style="opacity:.4"') + '>' +
+          ico(a.role === 'admin' ? 'shield' : 'user', 21) +
+          '<div class="rn">' + esc(a.name) + '</div>' +
+          '<div class="rd">' + (a.role === 'admin' ? 'صلاحية كاملة ومراجعة' : 'تحليل ومتابعة') + '</div></button>';
+      }).join('') +
       '</div><div id="gateFields"></div>' +
       '<div style="margin-top:16px"><button class="btn" id="gateGo">دخول</button></div><div id="gateErr"></div>' +
       '<div class="gate-note">' + ico('lock', 12) + ' هذا فصل أدوار للاستخدام، لا حاجز أمني. ' +
       'الملف يعمل من القرص بلا خادم، فمن يفتحه بمحرر نصوص يستطيع تجاوز الرمز. ' +
       'للحماية الفعلية شغّله من خادم داخلي بمصادقة.</div></div>';
-    on($('gate'), '.role', 'click', function (b) { gateRole = b.dataset.role; renderGate(); });
-    $('gateFields').innerHTML = gateRole === 'admin'
-      ? '<label class="field-label" for="gateCode">رمز المدير</label><input type="password" id="gateCode" autocomplete="off">' +
-        (isDefaultCode() ? '<div style="font-size:10px;color:var(--warning);margin-top:8px;line-height:1.7">الرمز الافتراضي ما زال فعّالًا — غيّره من صفحة الأمان بعد الدخول.</div>' : '')
-      : '<label class="field-label" for="gateName">الاسم (اختياري — يظهر في سجل التتبّع)</label><input type="text" id="gateName" autocomplete="off">';
-    var go = function () {
-      if (gateRole === 'admin') {
-        if (codeHash($('gateCode').value || '') !== adminHash()) {
-          $('gateErr').innerHTML = '<div class="errbox">رمز غير صحيح.</div>';
-          AU.log({ kind: 'security', actor: 'مجهول', title: 'محاولة دخول فاشلة', detail: 'رمز مدير غير صحيح' });
-          return;
-        }
-        S.session = { role: 'admin', name: 'مدير النظام' };
-      } else S.session = { role: 'user', name: (($('gateName').value || '').trim() || 'مستخدم') };
+    on($('gate'), '.role', 'click', function (b) { gateRole = b.dataset.acc; renderGate(); });
+    var cur = ACC.get(gateRole);
+    $('gateFields').innerHTML = cur
+      ? '<label class="field-label" for="gateCode">رمز ' + esc(cur.name) + '</label>' +
+        '<input type="password" id="gateCode" autocomplete="off">' +
+        (cur.seedCode ? '<div style="font-size:10px;color:var(--warning);margin-top:8px;line-height:1.7">الرمز الأولي ما زال فعّالًا — غيّره من صفحة الأمان.</div>' : '')
+      : '<div style="font-size:11px;color:var(--text2);margin-top:10px">اختر حسابًا للمتابعة.</div>';
+    var doGo = function () {
+      var a = ACC.get(gateRole);
+      if (!a) { $('gateErr').innerHTML = '<div class="errbox">اختر حسابًا أولًا.</div>'; return; }
+      if (!a.active) { $('gateErr').innerHTML = '<div class="errbox">هذا الحساب موقوف.</div>'; return; }
+      if (!ACC.verify(a.id, $('gateCode').value || '')) {
+        $('gateErr').innerHTML = '<div class="errbox">رمز غير صحيح.</div>';
+        AU.log({ kind: 'security', actor: a.name, title: 'محاولة دخول فاشلة', detail: 'رمز غير صحيح' });
+        return;
+      }
+      S.session = { id: a.id, role: a.role, name: a.name, loginAt: Date.now() };
       try { window.sessionStorage.setItem('nadheer:session', JSON.stringify(S.session)); } catch (e) {}
       AU.log({ kind: 'auth', actor: S.session.name, title: 'تسجيل دخول',
                detail: isAdmin() ? 'بصلاحية مدير النظام' : 'بصلاحية مستخدم' });
@@ -3135,12 +3266,19 @@ body.gated nav.topnav{display:none}
       backdrop(false);
       startApp();
     };
-    $('gateGo').addEventListener('click', go);
-    var inp = $('gateCode') || $('gateName');
-    if (inp) { inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); inp.focus(); }
+    $('gateGo').addEventListener('click', doGo);
+    var inp = $('gateCode');
+    if (inp) { inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doGo(); }); inp.focus(); }
+  }
+  function fmtDur(ms) {
+    var s = Math.max(0, Math.round(ms / 1000)), hh = Math.floor(s / 3600),
+        mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    return (hh ? hh + ' س ' : '') + (hh || mm ? mm + ' د ' : '') + ss + ' ث';
   }
   function logout() {
-    AU.log({ kind: 'auth', actor: S.session ? S.session.name : '—', title: 'تسجيل خروج', detail: '' });
+    var dur = S.session && S.session.loginAt ? fmtDur(Date.now() - S.session.loginAt) : '';
+    AU.log({ kind: 'auth', actor: S.session ? S.session.name : '—', title: 'تسجيل خروج',
+             detail: dur ? 'مدة الجلسة: ' + dur : '' });
     try { window.sessionStorage.removeItem('nadheer:session'); } catch (e) {}
     S.session = null; S.analyses = {}; S.openDoc = null;
     S.draft = { doc1: '', doc2: '', ctx: '', name: '', type: 'فحص كل البنود' }; S.files = {};
@@ -3275,10 +3413,12 @@ body.gated nav.topnav{display:none}
     { sep: 'الإدارة', admin: true },
     { r: 'admin', t: 'إعدادات المحرك', admin: true },
     { r: 'audit', t: 'سجل التتبّع', admin: true },
+    { r: 'approvals', t: 'الموافقات والنسخ', admin: true },
     { r: 'security', t: 'الأمان والدخول', admin: true }
   ];
   var routes = { home: renderHome, docs: renderDocs, doc: renderDoc, upload: renderUpload,
-                 plan: renderPlan, admin: renderAdmin, audit: renderAudit, security: renderSecurity };
+                 plan: renderPlan, admin: renderAdmin, audit: renderAudit, security: renderSecurity,
+                 approvals: renderApprovals };
   function renderNav() {
     var html = '<div class="hdr">التنقّل</div>';
     NAV.forEach(function (n) {
@@ -3293,7 +3433,7 @@ body.gated nav.topnav{display:none}
   }
   function go(route, arg) {
     if (!S.session) { renderGate(); return; }
-    if (['admin', 'audit', 'security'].indexOf(route) > -1 && !isAdmin()) route = 'home';
+    if (['admin', 'audit', 'security', 'approvals'].indexOf(route) > -1 && !isAdmin()) route = 'home';
     if (route === 'doc' && arg) { S.openDoc = arg; S.docTab = 'sum'; }
     S.route = route;
     $('navOverlay').classList.remove('open');
@@ -3308,6 +3448,7 @@ body.gated nav.topnav{display:none}
     on(el, '[data-r]', 'click', function (b) { go(b.dataset.r, b.dataset.id); });
     on(el, '.evidence', 'click', function (e) { openViewer(e.dataset.q, e.dataset.src); });
     on(el, '[data-status]', 'click', function (b) {
+      guard('task', 'تحديث مهمة معالجة', 'الحالة: ' + STATUS[b.dataset.status], b.dataset.code);
       ST.setTask(b.dataset.doc, b.dataset.code, { status: b.dataset.status, by: S.session.name });
       AU.log({ kind: 'data', actor: S.session.name, code: b.dataset.code,
                title: 'تحديث مهمة معالجة', detail: 'الحالة: ' + STATUS[b.dataset.status] });
@@ -3781,6 +3922,7 @@ body.gated nav.topnav{display:none}
       var d = ST.get(b.dataset.del);
       if (!window.confirm('حذف «' + (d ? d.name : '') + '» ومهامه وتاريخ خطره؟')) return;
       ST.remove(b.dataset.del);
+      guard('delete', 'حذف مستند', d ? d.name : '', d ? d.caseCode : '');
       AU.log({ kind: 'data', actor: S.session.name, title: 'حذف مستند', detail: d ? d.name : '' });
       refreshAll(); S.banner = { msg: 'حُذف المستند.' }; renderDocs();
     });
@@ -4037,14 +4179,21 @@ body.gated nav.topnav{display:none}
   function tabFix(doc, r) {
     var body = $('tabBody');
     if (!doc.refText) {
+      var isReg = doc.role === 'regulatory';
       body.innerHTML = '<div class="card"><div class="empty">' +
-        'كشف التعارض يحتاج مرجعًا تنظيميًا لمقارنة سياستك به.<br>الصق نص المرجع هنا ليُفحص المستند فورًا.</div>' +
-        '<textarea id="addRef" placeholder="الصق نص المرجع التنظيمي..." style="min-height:120px"></textarea>' +
+        (isReg
+          ? 'هذا مستند جهة رقابية — فهو المرجع نفسه.<br>الصق سياستك الداخلية هنا لتُقارن به ويُكشف ما يخالفه.'
+          : 'كشف التعارض يحتاج مرجعًا تنظيميًا لمقارنة سياستك به.<br>الصق نص المرجع هنا ليُفحص المستند فورًا.') +
+        '</div>' +
+        '<textarea id="addRef" placeholder="' + (isReg ? 'الصق نص سياستك الداخلية...' : 'الصق نص المرجع التنظيمي...') + '" style="min-height:120px"></textarea>' +
         '<button class="btn" id="saveRef" style="margin-top:12px">افحص التعارض</button></div>';
       $('saveRef').addEventListener('click', function () {
         var t = ($('addRef').value || '').trim();
         if (!t) return;
-        ST.update(doc.id, { refText: t.slice(0, ST.MAX_TEXT) });
+        /* لمستند رقابي: النص المُلصق هو السياسة، والمستند الحالي يصير المرجع */
+        if (isReg) ST.update(doc.id, { refText: doc.text.slice(0, ST.MAX_TEXT), text: t.slice(0, ST.MAX_TEXT) });
+        else ST.update(doc.id, { refText: t.slice(0, ST.MAX_TEXT) });
+        guard('ref', 'إضافة مرجع تنظيمي', doc.name, doc.caseCode);
         AU.log({ kind: 'data', actor: S.session.name, code: doc.caseCode,
                  title: 'إضافة مرجع تنظيمي', detail: doc.name });
         refreshAll(); renderDoc();
@@ -4313,25 +4462,26 @@ body.gated nav.topnav{display:none}
       '<select id="docType">' + Object.keys(S.cfg.docTypes).map(function (t) {
         return '<option' + (t === S.draft.type ? ' selected' : '') + '>' + esc(t) + '</option>';
       }).join('') + '</select>' +
-      /* المرجع أولًا: هو الثابت الذي تُقاس عليه كل الملفات، فتقديمه
-         يجعل الترتيب طبيعيًا — تختار المرجع مرة، ثم ترمي الملفات
-         فتُحلَّل وتُحفَظ في اللحظة نفسها بلا زرّ. */
-      '<div class="doclabel" style="margin-top:18px">المرجع التنظيمي — اختياري</div>' +
-      '<div class="hintline">اختره أولًا: يُقارَن به كل ما ترفعه بعده.</div>' +
-      '<button type="button" class="drop" id="drop_doc2"><div class="ic">' + ico('docs', 22) + '</div>' +
-      '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
-      '<input type="file" id="fi_doc2" accept=".pdf,.txt,.md" style="display:none"><div id="info_doc2"></div>' +
-      '<textarea id="paste_doc2" placeholder="أو الصق نص المرجع مباشرة..."></textarea>' +
-      '<hr class="hair">' +
-
-      '<div class="doclabel">المستندات — مطلوب</div>' +
+      '<label class="field-label" for="docRole">دور المستند — من أصدره</label>' +
+      '<select id="docRole">' +
+      '<option value="internal"' + (S.draft.role === 'regulatory' ? '' : ' selected') + '>مستند داخلي (سياسة · لائحة · عقد) — يُقارَن بمرجع</option>' +
+      '<option value="regulatory"' + (S.draft.role === 'regulatory' ? ' selected' : '') + '>مستند جهة رقابية (تعميم · تنظيم) — هو المرجع</option>' +
+      '</select>' +
+      '<div class="doclabel" style="margin-top:18px" id="lbl_doc1">المستند — مطلوب</div>' +
       '<div class="hintline">تُحلَّل وتُحفَظ فور اختيارها — بلا خطوة إضافية.</div>' +
       '<button type="button" class="drop hot" id="drop_doc1"><div class="ic">' + ico('doc', 22) + '</div>' +
       '<div class="mt">اسحب الملفات أو اضغط للاختيار</div>' +
       '<div class="ht">PDF · TXT — عدة ملفات دفعة واحدة</div></button>' +
       '<input type="file" id="fi_doc1" accept=".pdf,.txt,.md" multiple style="display:none"><div id="info_doc1"></div>' +
       '<textarea id="paste_doc1" placeholder="أو الصق النص مباشرة..."></textarea>' +
-      '<div style="margin-top:16px"><button class="btn" id="analyzeBtn">حلّل واحفظ النص الملصوق</button></div>' +
+      '<hr class="hair">' +
+      '<div class="doclabel" id="lbl_doc2">المرجع التنظيمي — اختياري</div>' +
+      '<div class="hintline">يُقارَن به كل ملف من الملفات أعلاه. اختره قبلها إن أمكن.</div>' +
+      '<button type="button" class="drop" id="drop_doc2"><div class="ic">' + ico('docs', 22) + '</div>' +
+      '<div class="mt">اسحب الملف أو اضغط للاختيار</div><div class="ht">PDF · TXT</div></button>' +
+      '<input type="file" id="fi_doc2" accept=".pdf,.txt,.md" style="display:none"><div id="info_doc2"></div>' +
+      '<textarea id="paste_doc2" placeholder="أو الصق النص مباشرة..."></textarea>' +
+      '<div style="margin-top:16px"><button class="btn" id="analyzeBtn">حلّل واحفظ</button></div>' +
       '<div id="errArea"></div></div>';
     wire(el);
     ['doc1', 'doc2'].forEach(function (key) {
@@ -4352,14 +4502,28 @@ body.gated nav.topnav{display:none}
     $('docName').value = S.draft.name || '';
     $('docName').addEventListener('input', function () { S.draft.name = this.value; });
     $('docType').addEventListener('change', function () { S.draft.type = this.value; });
+    // دور المستند يقلب معنى الخانتين — لا يعيد رسم الشاشة ولا يفقد ما أُدخل
+    function applyRole() {
+      var reg = $('docRole').value === 'regulatory';
+      S.draft.role = reg ? 'regulatory' : 'internal';
+      $('lbl_doc1').textContent = reg ? 'التعميم أو التنظيم — مطلوب' : 'المستند — مطلوب';
+      $('lbl_doc2').textContent = reg ? 'سياستك الداخلية — اختياري (تُقارن بالتعميم)' : 'المرجع التنظيمي — اختياري';
+    }
+    $('docRole').addEventListener('change', applyRole);
+    applyRole();
     $('analyzeBtn').addEventListener('click', runAnalysis);
   }
   function showFile(key, name, len) {
     var info = $('info_' + key);
     info.innerHTML = '<div class="fileinfo"><span>' + esc(name) + ' — ' + len.toLocaleString('en-US') +
       ' حرف</span><button type="button">إزالة</button></div>';
-    info.querySelector('button').addEventListener('click', function () { delete S.files[key]; info.innerHTML = ''; });
-    if (key === 'doc1' && !$('docName').value) { $('docName').value = name.replace(/\.[^.]+$/, ''); S.draft.name = $('docName').value; }
+    info.querySelector('button').addEventListener('click', function () {
+      delete S.files[key]; S.draft[key] = '';
+      var box = $('paste_' + key); if (box) box.value = '';
+      info.innerHTML = '';
+    });
+    var nameEl = $('docName');
+    if (key === 'doc1' && nameEl && !nameEl.value) { nameEl.value = name.replace(/\.[^.]+$/, ''); S.draft.name = nameEl.value; }
   }
   /* ── الدفعة ──
      الحالة الشائعة أن تُقارن عدة سياسات بمرجعٍ واحد. كان لا بد من رفعها
@@ -4399,8 +4563,10 @@ body.gated nav.topnav{display:none}
     if (box && !box.querySelector('.auto-note')) {
       var n = document.createElement('div');
       n.className = 'auto-note';
-      n.innerHTML = '<span>سيبدأ التحليل والحفظ تلقائيًا…</span>' +
-                    '<button type="button" class="auto-stop">إيقاف</button>';
+      var noRef = !(S.files.doc2 || (S.draft.doc2 || '').trim());
+      n.innerHTML = '<span>سيبدأ التحليل والحفظ تلقائيًا…' +
+                    (noRef ? ' <b>بلا مرجع للمقارنة</b> — أوقفه إن أردت إضافته.' : '') +
+                    '</span><button type="button" class="auto-stop">إيقاف</button>';
       box.appendChild(n);
       n.querySelector('.auto-stop').addEventListener('click', function () {
         if (autoTimer) clearTimeout(autoTimer);
@@ -4448,9 +4614,13 @@ body.gated nav.topnav{display:none}
     (isPdf ? extractPdf(file) : file.text()).then(function (text) {
       if (!text || !text.trim()) throw new Error('لا يحتوي هذا الملف نصًا قابلًا للاستخراج — غالبًا صورة ممسوحة ضوئيًا.');
       S.files[key] = { name: file.name, text: text };
-      showFile(key, file.name, text.length);
+      S.draft[key] = text;                         // مصدر واحد للحقيقة
+      var box = $('paste_' + key); if (box) box.value = text;
+      // رسم الواجهة معزول: خطأ هنا لا يجوز أن يحذف نصًا قُرئ بنجاح
+      try { showFile(key, file.name, text.length); }
+      catch (uiErr) { info.innerHTML = '<div class="fileinfo"><span>' + esc(file.name) + ' — ' + text.length.toLocaleString('en-US') + ' حرف</span></div>'; }
     }).catch(function (err) {
-      info.innerHTML = ''; delete S.files[key];
+      info.innerHTML = '';
       showError(isPdf ? 'تعذّر قراءة ملف PDF. جرّب حفظه كنص، أو الصق المحتوى مباشرة.' : err.message);
     });
   }
@@ -4500,6 +4670,9 @@ body.gated nav.topnav{display:none}
         var res = E.analyze({ docText: b.text, refText: refText, config: S.cfg, docType: docType });
         var code = AU.nextCode('NR');
         var nm = b.name.replace(/\.[^.]+$/, '');
+        /* كل مستند في الدفعة إجراءٌ مؤثر مستقل: لقطة وطلب موافقة لكلٍّ
+           منه، وإلا مرّت الدفعة كلها من غير رقابة. */
+        guard('analyze', 'تحليل وحفظ مستند: ' + nm, docType, code);
         var saved = ST.add({ name: nm, text: b.text, refText: refText, docType: docType,
                              refName: S.files.doc2 ? S.files.doc2.name : '',
                              caseCode: code, fp: res.fingerprint });
@@ -4526,11 +4699,24 @@ body.gated nav.topnav{display:none}
                'فحص البنود المعيارية', 'حساب الخطر وحفظ المستند'];
   function runAnalysis() {
     var err = $('errArea'); if (err) err.innerHTML = '';
-    var t2 = ((S.files.doc2 ? S.files.doc2.text : '') + '\n\n' + (S.draft.doc2 || '')).trim();
-    // دفعةٌ من الملفات؟ كلها تُقارن بالمرجع نفسه
+    // المصدر: ما يراه المستخدم في المربع، ثم المسودة، ثم الملف — أول غير فارغ
+    function pick(key) {
+      var box = $('paste_' + key), v = box ? (box.value || '').trim() : '';
+      if (v) return v;
+      if (S.draft[key] && S.draft[key].trim()) return S.draft[key].trim();
+      return S.files[key] ? S.files[key].text.trim() : '';
+    }
+    var t1 = pick('doc1'), t2 = pick('doc2');
+    /* دفعةٌ من الملفات؟ كلها تُقارن بالمرجع نفسه.
+       ودورُ المستند يبقى محترمًا: إن كان المرفوع تعاميمَ رقابية، فكلٌّ
+       منها مرجعٌ يُقاس عليه ما في خانة المقارنة. */
     if (S.batch.length) { runBatch(t2); return; }
-    var t1 = ((S.files.doc1 ? S.files.doc1.text : '') + '\n\n' + (S.draft.doc1 || '')).trim();
     if (!t1) { showError('أضف المستند أولًا — ارفع ملفًا أو الصق النص.'); return; }
+    var role = $('docRole') ? $('docRole').value : 'internal';
+    /* مستند الجهة الرقابية هو المرجع لا الطرف المحكوم عليه.
+       فإن رُفعت معه سياسة داخلية، تُقلب الوجهة: السياسة تُفحص، والتعميم يُقاس عليه. */
+    var mainText = t1, refText = t2, isReg = (role === 'regulatory');
+    if (isReg && t2) { mainText = t2; refText = t1; }
     var name = ($('docName').value || '').trim() ||
                (S.files.doc1 ? S.files.doc1.name.replace(/\.[^.]+$/, '') : 'مستند ' + ST.today());
     var docType = $('docType').value;
@@ -4544,13 +4730,14 @@ body.gated nav.topnav{display:none}
 
     setTimeout(function () {
       var res;
-      try { res = E.analyze({ docText: t1, refText: t2, config: S.cfg, docType: docType }); }
+      try { res = E.analyze({ docText: mainText, refText: refText, config: S.cfg, docType: docType }); }
       catch (e) {
         $('proc').classList.remove('active'); go('upload');
         showError('تعذّر تحليل هذا المستند: ' + e.message); return;
       }
       var code = AU.nextCode('NR');
-      var saved = ST.add({ name: name, text: t1, refText: t2, docType: docType,
+      guard('analyze', 'تحليل وحفظ مستند: ' + name, docType, code);
+      var saved = ST.add({ name: name, text: mainText, refText: refText, docType: docType, role: role,
                            refName: S.files.doc2 ? S.files.doc2.name : '', caseCode: code, fp: res.fingerprint });
       AU.log({ kind: 'analysis', actor: S.session.name, code: code, title: 'تحليل مستند: ' + name,
         detail: res.counts.chars.toLocaleString('en-US') + ' حرف · ' + res.obligations.length + ' التزام · ' +
@@ -4892,6 +5079,69 @@ body.gated nav.topnav{display:none}
   }
 
   /* ═══ الإقلاع ═══ */
+
+  /* ═══ الموافقات والنسخ — للمدير وحده ═══ */
+  function renderApprovals() {
+    /* العنصر اسمه pageContent لا page — كان $('page') يعيد null فتُخفق
+       الكتابة صامتةً وتبقى الصفحة السابقة معروضة. */
+    var el = $('pageContent'), pend = RQ.pending(), hist = RQ.all().filter(function (r) { return r.status !== 'pending'; }).reverse().slice(0, 30);
+    var vers = VS.all().slice().reverse();
+    var html = '<h2 class="pagetitle">الموافقات والنسخ</h2>' +
+      '<p class="pagesub">كل إجراء مؤثر يقوم به مستخدم يُنفَّذ فورًا ويصل هنا. الاعتماد يُثبته، والإلغاء يرجّع الحالة السابقة فعليًا.</p>';
+
+    html += '<div class="card"><div class="sectitle">بانتظار قرارك (' + pend.length + ')</div>';
+    html += pend.length ? pend.map(function (r) {
+      return '<div class="fileinfo" style="align-items:flex-start;flex-direction:column;gap:8px;margin-bottom:10px">' +
+        '<div style="width:100%"><div style="font-weight:700;font-size:12.5px">' + esc(r.title) + '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:3px;line-height:1.7">' +
+          esc(r.actor) + ' · ' + new Date(r.at).toLocaleString('ar-SA') +
+          (r.code ? ' · ' + esc(r.code) : '') + (r.detail ? '<br>' + esc(r.detail) : '') + '</div></div>' +
+        '<div style="display:flex;gap:8px;width:100%">' +
+        '<button class="btn" style="padding:8px" data-ok="' + r.id + '">اعتماد</button>' +
+        '<button class="btn ghost" style="padding:8px" data-no="' + r.id + '">إلغاء وإرجاع</button>' +
+        '</div></div>';
+    }).join('') : '<div class="empty">لا شيء بانتظار قرارك.</div>';
+    html += '</div>';
+
+    html += '<div class="card"><div class="sectitle">النسخ المحفوظة (' + vers.length + ')</div>' +
+      '<div style="font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:10px">' +
+      'لقطة كاملة للمستندات قبل كل تغيير. الاسترجاع يأخذ لقطة أخرى أولًا، فلا تفقد الحالة الراهنة.</div>';
+    html += vers.length ? vers.slice(0, 25).map(function (v) {
+      return '<div class="fileinfo" style="margin-bottom:8px">' +
+        '<span>' + new Date(v.at).toLocaleString('ar-SA') + ' · ' + esc(v.actor) +
+        ' · ' + v.docs.length + ' مستند' + (v.label ? ' · ' + esc(v.label) : '') + '</span>' +
+        '<button type="button" data-vs="' + v.id + '">استرجاع</button></div>';
+    }).join('') : '<div class="empty">لا توجد نسخ بعد.</div>';
+    html += '</div>';
+
+    html += '<div class="card"><div class="sectitle">قرارات سابقة</div>';
+    html += hist.length ? hist.map(function (r) {
+      var okc = r.status === 'approved';
+      return '<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.8">' +
+        '<span class="badge ' + (okc ? 'low' : 'high') + '">' + (okc ? 'معتمد' : 'ملغى') + '</span> ' +
+        esc(r.title) + ' — ' + esc(r.actor) +
+        '<div style="font-size:10.5px;color:var(--text3)">' + new Date(r.decidedAt || r.at).toLocaleString('ar-SA') +
+        ' · بقرار ' + esc(r.decidedBy || '—') + '</div></div>';
+    }).join('') : '<div class="empty">لا قرارات بعد.</div>';
+    html += '</div>';
+
+    el.innerHTML = html;
+    wire(el);
+    on(el, '[data-ok]', 'click', function (b) { RQ.decide(b.dataset.ok, true); refreshAll(); renderApprovals(); });
+    on(el, '[data-no]', 'click', function (b) {
+      var r = RQ.decide(b.dataset.no, false);
+      refreshAll(); renderApprovals();
+      if (r.ok && !r.reverted) alert('أُلغي الإجراء، لكن لم توجد لقطة سابقة لإرجاعها.');
+    });
+    on(el, '[data-vs]', 'click', function (b) {
+      if (!window.confirm('استرجاع هذه النسخة؟ ستُحفظ الحالة الحالية كنسخة قبل الاسترجاع.')) return;
+      if (VS.restore(b.dataset.vs)) {
+        AU.log({ kind: 'security', actor: S.session.name, title: 'استرجاع نسخة', detail: b.dataset.vs });
+        refreshAll(); renderApprovals();
+      }
+    });
+  }
+
   function startApp() {
     S.cfg = NC.load(); S.cfgDraft = null;
     try { window.localStorage.setItem('nadheer:probe', '1'); window.localStorage.removeItem('nadheer:probe'); S.storageOK = true; }

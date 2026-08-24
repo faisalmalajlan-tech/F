@@ -131,5 +131,7 @@
 
   return { list: list, get: get, add: add, update: update, remove: remove,
            recordRisk: recordRisk, delta: delta, setTask: setTask, taskOf: taskOf,
-           usage: usage, clear: clear, today: today, MAX_TEXT: MAX_TEXT };
+           usage: usage, clear: clear, today: today, MAX_TEXT: MAX_TEXT,
+           /* يصفّر كاش الذاكرة حتى تُقرأ النسخة المسترجَعة من التخزين */
+           reset: function () { mem = null; } };
 });
